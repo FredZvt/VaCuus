@@ -2,6 +2,7 @@
 
 #include "VaCuusContentPaths.h"
 
+#include "VaCuusBundle.h"
 #include "VaCuusBundleMount.h"
 #include "VaCuusDefines.h"
 
@@ -13,36 +14,158 @@ namespace VaCuusContentPaths
 {
 namespace Private
 {
-/** Subdirectory both roots share; the documents themselves are addressed relative to it. */
+/** Subdirectory every root shares; the documents themselves are addressed relative to it. */
 static const TCHAR* GDevUISubDir = TEXT("DevUI");
+
+/** Tier 1, and the one plugin excluded from the tier-2 scan so it cannot be listed twice. */
+static const TCHAR* GVaCuusPluginName = TEXT("VaCuus");
+
+/** One content directory -> one absolute DevUI root. The only place the two are joined. */
+static FString ToDevUIRoot(const FString& ContentDir)
+{
+	return FPaths::ConvertRelativePathToFull(ContentDir / GDevUISubDir);
+}
+
+/** A tier-2 candidate: the name is what orders it, the content dir is what becomes the root. */
+struct FDiscoveredPluginRoot
+{
+	FString PluginName;
+	FString ContentDir;
+};
+
+/**
+ * Every enabled plugin EXCEPT VaCuus that actually has a Content/DevUI directory, sorted by
+ * plugin name.
+ *
+ * SORTED, because GetEnabledPlugins() hands back discovery order -- which depends on where a
+ * plugin lives (project, engine, additional directory) and on the filesystem's enumeration
+ * order inside each. Precedence between two plugins that ship the same document path would
+ * otherwise be decided by something neither author can see, and it would be free to change
+ * between machines. FCString::Strcmp, not FString::operator<, for the reason
+ * VaCuusBundlePack::EnumerateTree records at length: the latter compares case-insensitively
+ * and would answer "equal" for the one pair that can still collide, handing the tiebreak
+ * back to enumeration order.
+ */
+static TArray<FDiscoveredPluginRoot> DiscoverPluginRoots(int32& OutNumScanned)
+{
+	TArray<FDiscoveredPluginRoot> Discovered;
+	IFileManager& FileManager = IFileManager::Get();
+
+	const TArray<TSharedRef<IPlugin>> EnabledPlugins = IPluginManager::Get().GetEnabledPlugins();
+	OutNumScanned = EnabledPlugins.Num();
+
+	for (const TSharedRef<IPlugin>& Plugin : EnabledPlugins)
+	{
+		if (Plugin->GetName() == GVaCuusPluginName)
+		{
+			continue;
+		}
+
+		// THE EXISTENCE GATE (VaCuusContentPaths.h): ~100 enabled plugins is normal and
+		// ResolveExistingDocument stats every root before reporting a miss, so an ungated
+		// list would be paid for on every unresolved path.
+		const FString Candidate = ToDevUIRoot(Plugin->GetContentDir());
+		if (!FileManager.DirectoryExists(*Candidate))
+		{
+			// Verbose, not Log: this is the answer for almost every plugin in the build, and
+			// at Log it would bury the roots line it exists to explain.
+			UE_LOG(LogVaCuus, Verbose, TEXT("Plugin '%s' contributes no document root ('%s' does not exist)"),
+				*Plugin->GetName(), *Candidate);
+			continue;
+		}
+
+		Discovered.Add(FDiscoveredPluginRoot{Plugin->GetName(), Plugin->GetContentDir()});
+	}
+
+	Discovered.Sort([](const FDiscoveredPluginRoot& A, const FDiscoveredPluginRoot& B) {
+		return FCString::Strcmp(*A.PluginName, *B.PluginName) < 0;
+	});
+
+	return Discovered;
+}
 
 static TArray<FString> BuildDocumentRoots()
 {
-	TArray<FString> Roots;
-
-	// 1. The plugin's own content -- canonical (D19).
-	if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("VaCuus")))
+	// 1. VaCuus's own content -- canonical (D19).
+	FString VaCuusContentDir;
+	if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(GVaCuusPluginName))
 	{
-		Roots.Add(FPaths::ConvertRelativePathToFull(Plugin->GetContentDir() / GDevUISubDir));
+		VaCuusContentDir = Plugin->GetContentDir();
 	}
 	else
 	{
-		// Not fatal: the project root below is still a valid place for documents, and a
-		// missing descriptor means something much larger is wrong (VaCuusRender's
-		// StartupModule check()s on the same lookup for its shader directory).
+		// Not fatal: the other roots are still valid places for documents, and a missing
+		// descriptor means something much larger is wrong (VaCuusRender's StartupModule
+		// check()s on the same lookup for its shader directory).
 		UE_LOG(LogVaCuus, Error,
-			TEXT("VaCuus plugin descriptor not found, so the plugin's Content/DevUI cannot be a document root; ")
-			TEXT("only <Project>/Content/DevUI will be searched"));
+			TEXT("VaCuus plugin descriptor not found, so VaCuus's own Content/DevUI cannot be a document root; ")
+			TEXT("only discovered plugin roots and <Project>/Content/DevUI will be searched"));
 	}
 
-	// 2. The project's, for documents a project adds itself.
-	const FString ProjectRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / GDevUISubDir);
-	Roots.AddUnique(ProjectRoot);
+	// 2. Every other enabled plugin that ships documents.
+	int32 NumScanned = 0;
+	const TArray<FDiscoveredPluginRoot> Discovered = DiscoverPluginRoots(NumScanned);
 
+	TArray<FString> OtherPluginContentDirs;
+	OtherPluginContentDirs.Reserve(Discovered.Num());
+	TArray<FString> DiscoveredNames;
+	DiscoveredNames.Reserve(Discovered.Num());
+	for (const FDiscoveredPluginRoot& Root : Discovered)
+	{
+		OtherPluginContentDirs.Add(Root.ContentDir);
+		DiscoveredNames.Add(Root.PluginName);
+	}
+
+	// 3. The project's, for documents a project adds itself.
+	TArray<FString> Roots = ComposeDocumentRoots(VaCuusContentDir, OtherPluginContentDirs, FPaths::ProjectContentDir());
+
+	// The wording of this line is load-bearing -- live reload's "if reload seems dead, check
+	// that the file you edited is under a root named above" points at it, and the docs quote
+	// it -- so it stays exactly as it was when there were two roots.
 	UE_LOG(LogVaCuus, Log, TEXT("VaCuus document roots (in order): %s"), *FString::Join(Roots, TEXT(" | ")));
+
+	// And WHICH plugins put a root in that list, because the list itself shows directories and
+	// a reader asking "why is that one there" has no other way to find out. Unconditional even
+	// at zero: "none of your plugins ship documents" is the answer to the commonest question
+	// about this feature, and a staged-but-pruned Shipping index can produce it unexpectedly
+	// (VaCuusContentPaths.h).
+	UE_LOG(LogVaCuus, Log, TEXT("VaCuus found %d plugin document root(s) among %d enabled plugin(s)%s%s"),
+		DiscoveredNames.Num(), NumScanned, DiscoveredNames.Num() > 0 ? TEXT(": ") : TEXT(""),
+		*FString::Join(DiscoveredNames, TEXT(", ")));
+
 	return Roots;
 }
 }	 // namespace Private
+
+TArray<FString> ComposeDocumentRoots(const FString& VaCuusContentDir,
+	const TArray<FString>& OtherPluginContentDirs, const FString& ProjectContentDir)
+{
+	TArray<FString> Roots;
+	Roots.Reserve(OtherPluginContentDirs.Num() + 2);
+
+	// AddUnique everywhere, including tier 1: a plugin whose content directory IS the
+	// project's (a plugin mounted under <Project>/Content, which the engine permits) must not
+	// put the same root in the list twice.
+	if (!VaCuusContentDir.IsEmpty())
+	{
+		Roots.AddUnique(Private::ToDevUIRoot(VaCuusContentDir));
+	}
+
+	for (const FString& ContentDir : OtherPluginContentDirs)
+	{
+		if (!ContentDir.IsEmpty())
+		{
+			Roots.AddUnique(Private::ToDevUIRoot(ContentDir));
+		}
+	}
+
+	if (!ProjectContentDir.IsEmpty())
+	{
+		Roots.AddUnique(Private::ToDevUIRoot(ProjectContentDir));
+	}
+
+	return Roots;
+}
 
 const TArray<FString>& GetDocumentRoots()
 {
@@ -103,6 +226,95 @@ FString ResolveExistingDocument(const FString& VfsPath, FString* OutRoot, bool b
 	}
 
 	return FString();
+}
+
+int32 ScanShadowedDocuments(const TArray<FString>& Roots, TArray<FString>* OutShadowedPaths)
+{
+	if (OutShadowedPaths)
+	{
+		OutShadowedPaths->Reset();
+	}
+
+	IFileManager& FileManager = IFileManager::Get();
+
+	// Normalized path -> the disk path of the root that WINS it. First claim wins, which is
+	// what makes this report agree with FVaCuusFileInterface::Open rather than merely
+	// resemble it.
+	TMap<FString, FString> ClaimedBy;
+	int32 NumShadowed = 0;
+
+	for (const FString& Root : Roots)
+	{
+		const FString FullRoot = FPaths::ConvertRelativePathToFull(Root);
+
+		TArray<FString> Found;
+		for (const TCHAR* Extension : VaCuusBundleFormat::GetPackedExtensions())
+		{
+			// bClearFileNames false: accumulate across extensions, one pass per extension,
+			// exactly as VaCuusBundlePack::EnumerateTree walks the same tree.
+			FileManager.FindFilesRecursive(Found, *FullRoot, *(FString(TEXT("*.")) + Extension),
+				/*Files*/ true, /*Directories*/ false, /*bClearFileNames*/ false);
+		}
+
+		// Sorted so that WHICH of two case-only variants inside one root is reported as the
+		// winner is a property of the names and not of the filesystem's enumeration order.
+		// Strcmp for the reason DiscoverPluginRoots states: an insensitive compare answers
+		// "equal" for precisely the pair that can collide here.
+		Found.Sort([](const FString& A, const FString& B) { return FCString::Strcmp(*A, *B) < 0; });
+
+		for (const FString& DiskPath : Found)
+		{
+			const FString FullPath = FPaths::ConvertRelativePathToFull(DiskPath);
+			if (!FullPath.StartsWith(FullRoot + TEXT("/")))
+			{
+				// Defensive, and the same guard EnumerateTree carries: a path that does not
+				// sit under the root it was found through cannot be turned into a relative
+				// VFS path, and silently mangling one would make this report lie.
+				UE_LOG(LogVaCuus, Warning, TEXT("Ignoring '%s': it is not under the root '%s' it was found through"),
+					*FullPath, *FullRoot);
+				continue;
+			}
+
+			const FString NormalizedPath = VaCuusBundleFormat::NormalizePath(FullPath.Mid(FullRoot.Len() + 1));
+			if (VaCuusBundleFormat::IsExcludedTestPath(NormalizedPath))
+			{
+				// Automation fixtures are per-root by design (every root may carry its own
+				// Tests/), never shipped, and never addressed by a document -- so a
+				// collision between two of them is not a fault to report.
+				continue;
+			}
+
+			if (const FString* Winner = ClaimedBy.Find(NormalizedPath))
+			{
+				// The whole point of the function. Both disk paths, because "which copy" is
+				// the question a reader actually has, and the consequence spelled out
+				// because the shadowed file produces no other symptom: no open, no log, no
+				// reload.
+				UE_LOG(LogVaCuus, Warning,
+					TEXT("Document '%s' is SHADOWED: '%s' is what every request gets, and '%s' is never opened -- ")
+					TEXT("an edit to it does nothing at all. Earlier roots win (VaCuusContentPaths.h); rename one ")
+					TEXT("copy or delete it"),
+					*NormalizedPath, **Winner, *FullPath);
+
+				++NumShadowed;
+				if (OutShadowedPaths)
+				{
+					OutShadowedPaths->Add(NormalizedPath);
+				}
+				continue;
+			}
+
+			ClaimedBy.Add(NormalizedPath, FullPath);
+		}
+	}
+
+	// Logged at Log even on zero: it is the line that proves the scan RAN. Without it, a tree
+	// with no duplicates and a scan that silently found no directories to walk at all read
+	// identically -- and the second is what a regression in the root list would look like.
+	UE_LOG(LogVaCuus, Log, TEXT("VaCuus document shadow scan: %d document(s) served by more than one root (%d total)"),
+		NumShadowed, ClaimedBy.Num() + NumShadowed);
+
+	return NumShadowed;
 }
 
 namespace Private

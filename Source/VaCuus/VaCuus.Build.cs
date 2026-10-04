@@ -141,19 +141,68 @@ public class VaCuus : ModuleRules
 		// builds stage BOTH: the bundle mounts first, so behavior matches Shipping, while
 		// the loose files stay available for `vacuus.Bundle.Enable 0` A/B debugging -- and
 		// the M==0 serving assertion in the packaged gate is what proves the bundle, not
-		// the loose copies, actually served. Target.Configuration is readable here because
-		// rules code runs per-target-per-configuration (ReadOnlyTargetRules.Configuration
-		// => Inner.Configuration, ReadOnlyTargetRules.cs).
-		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		// the loose copies, actually served. The gate itself, and the extension list, now
+		// live in StageDevUI below so a consuming plugin shares both rather than copying them.
+		StageDevUI(this, Target, "$(PluginDir)/Content/DevUI");
+	}
+
+	/**
+	 * The loose formats VaCuus reads, and the one list a consumer must not re-type.
+	 *
+	 * MUST TRACK VaCuusBundleFormat::GetPackedExtensions() and the live-reload watcher's
+	 * whitelist, for the reason the block above records: these are the formats the VFS
+	 * actually reads. The image list is exactly what the recorder accepts
+	 * (VaCuusRecordingRenderInterface.cpp:294 -- PNG, JPEG and UEJPEG; every other format is
+	 * refused at the probe), and the font list is what RmlUi's FreeType interface loads.
+	 */
+	private static readonly string[] DevUIStagedPatterns = new string[] {
+		"*.rml", "*.rcss", "*.js", "*.mjs", "*.png", "*.jpg", "*.jpeg", "*.ttf", "*.otf"
+	};
+
+	/**
+	 * Stages one DevUI tree into a cooked non-Shipping game. CALL THIS FROM A CONSUMING
+	 * PLUGIN'S OWN .Build.cs:
+	 *
+	 *     VaCuus.StageDevUI(this, Target, "$(PluginDir)/Content/DevUI");
+	 *
+	 * WHY IT IS PUBLIC AND WHY THERE IS NO OTHER ROUTE. Every .Build.cs in a target compiles
+	 * into one rules assembly, so a module that depends on VaCuus can call this directly --
+	 * and nothing else it could write would work. The globs above expand relative to the
+	 * calling module's $(PluginDir), so VaCuus cannot stage another plugin's files on its
+	 * behalf; and ProjectPackagingSettings' DirectoriesToAlwaysStageAsUFS resolves its entries
+	 * against the PROJECT's content root (CopyBuildToStagingDirectory.Automation.cs:2054),
+	 * never a plugin's. A plugin that ships documents and does not call this gets a packaged
+	 * Development build with its UI missing and one Warning per file at load.
+	 *
+	 * IT IS NOT NEEDED FOR SHIPPING, and the gate below is not a convenience: Shipping serves
+	 * the cooked UVaCuusBundle only (spec M6 2(d)), the pack already walks every document root
+	 * including this one (VaCuusContentPaths.h), and the packaged acceptance gate asserts that
+	 * ZERO opens were served loose. A consumer that staged loose files into Shipping would
+	 * break that assertion rather than add a safety net.
+	 *
+	 * THE MAKEFILE-CACHE TRAP APPLIES TO THE CALLER'S FILE, not this one: the wildcards are
+	 * expanded during makefile GENERATION and frozen into the .target receipt, and a plugin's
+	 * Content directory is not a UBT invalidation input. So when a document is ADDED, touch
+	 * the .Build.cs that called this (it is that module's Module.RulesFile, i.e. an
+	 * ExternalDependency -- UEBuildTarget.cs:3459) or pass -Rebuild. The long-form chain is in
+	 * the comment above.
+	 */
+	public static void StageDevUI(ModuleRules Rules, ReadOnlyTargetRules Target, string DevUIDir)
+	{
+		// Target.Configuration is readable in rules code because rules run
+		// per-target-per-configuration (ReadOnlyTargetRules.Configuration => Inner.Configuration,
+		// ReadOnlyTargetRules.cs).
+		if (Target.Configuration == UnrealTargetConfiguration.Shipping)
 		{
-			string DevUIDir = "$(PluginDir)/Content/DevUI";
-			foreach (string Pattern in new string[] { "*.rml", "*.rcss", "*.js", "*.mjs", "*.png", "*.jpg", "*.jpeg", "*.ttf", "*.otf" })
-			{
-				// `.../` before the pattern so subdirectories are included -- img/ and fonts/
-				// today, and whatever a document references tomorrow. FileFilter resolves `...`
-				// as "any depth" (EpicGames.Core/FileFilter.cs).
-				RuntimeDependencies.Add(DevUIDir + "/.../" + Pattern, StagedFileType.UFS);
-			}
+			return;
+		}
+
+		foreach (string Pattern in DevUIStagedPatterns)
+		{
+			// `.../` before the pattern so subdirectories are included -- img/ and fonts/
+			// today, and whatever a document references tomorrow. FileFilter resolves `...`
+			// as "any depth" (EpicGames.Core/FileFilter.cs).
+			Rules.RuntimeDependencies.Add(DevUIDir + "/.../" + Pattern, StagedFileType.UFS);
 		}
 	}
 }

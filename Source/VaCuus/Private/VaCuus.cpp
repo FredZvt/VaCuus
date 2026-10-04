@@ -37,8 +37,23 @@ void FVaCuusModule::StartupModule()
 
 	// Primed HERE, on the game thread, and that is the only reason the call is not
 	// simply left to the first document load: it resolves through
-	// IPluginManager::FindPlugin(), and the first load happens on the UI thread.
+	// IPluginManager::FindPlugin() and GetEnabledPlugins(), and the first load happens
+	// on the UI thread.
 	VaCuusContentPaths::GetDocumentRoots();
+
+#if !UE_BUILD_SHIPPING
+	// CALLED FROM HERE, not from inside BuildDocumentRoots(), for two reasons. The scan must
+	// not run inside the function-local static's initializer -- it takes the roots as an
+	// argument today, but a future line of it that reached for GetDocumentRoots() would
+	// recurse into a static whose initialization has not finished. And it walks every root's
+	// tree, which belongs in module startup where it is attributable, not hidden in a getter
+	// that half the plugin calls.
+	//
+	// Not in Shipping: there are no loose roots to collide in a Shipping package (the bundle
+	// serves everything, and its own pack already reported shadows at cook time), so the walk
+	// would cost boot time to prove something about files that are not there.
+	VaCuusContentPaths::ScanShadowedDocuments(VaCuusContentPaths::GetDocumentRoots());
+#endif
 
 	UE_LOG(LogVaCuus, Log, TEXT("VaCuus runtime module started"));
 }

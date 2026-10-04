@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 
+#include "VaCuusBundle.h"
 #include "VaCuusContentPaths.h"
 #include "VaCuusFileInterface.h"
 
@@ -152,6 +153,13 @@ bool FVaCuusFileInterfaceTest::RunTest(const FString& Parameters)
  * flipped, a project copy someone re-creates would silently shadow the plugin document
  * the editor file watcher is watching -- live reload would stop working with no error
  * anywhere. So the order is asserted, not just the resolution.
+ *
+ * WHAT IT CANNOT ASSERT ANY MORE, and why that is not a loss: the COUNT. Tier 2 is every
+ * other enabled plugin that has a Content/DevUI, so the number of roots is a property of
+ * the machine this runs on, not of the code. The two ENDS are still the contract -- VaCuus
+ * first, the project last -- and they are what every precedence claim rests on, so they are
+ * asserted here; the composition rule itself has its own test
+ * (VaCuus.Core.ContentRootComposition) which does not depend on what is installed.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusContentRootsTest, "VaCuus.Core.ContentRoots",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -159,7 +167,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusContentRootsTest, "VaCuus.Core.ContentRo
 bool FVaCuusContentRootsTest::RunTest(const FString& Parameters)
 {
 	const TArray<FString>& Roots = VaCuusContentPaths::GetDocumentRoots();
-	if (!TestEqual(TEXT("Exactly two DevUI roots (plugin, project)"), Roots.Num(), 2))
+	if (!TestTrue(TEXT("At least the VaCuus and project DevUI roots"), Roots.Num() >= 2))
 	{
 		return false;
 	}
@@ -175,8 +183,38 @@ bool FVaCuusContentRootsTest::RunTest(const FString& Parameters)
 	const FString ExpectedProjectRoot =
 		FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("DevUI"));
 
-	TestEqual(TEXT("Root 0 is the PLUGIN's Content/DevUI"), Roots[0], ExpectedPluginRoot);
-	TestEqual(TEXT("Root 1 is the PROJECT's Content/DevUI"), Roots[1], ExpectedProjectRoot);
+	TestEqual(TEXT("The FIRST root is VaCuus's own Content/DevUI"), Roots[0], ExpectedPluginRoot);
+	TestEqual(TEXT("The LAST root is the PROJECT's Content/DevUI"), Roots.Last(), ExpectedProjectRoot);
+
+	// Every root between them must be a real plugin's DevUI directory that EXISTS -- the
+	// existence gate is the only thing keeping this list short, and a regression that dropped
+	// it would show up here as a middle root nothing is at.
+	{
+		TSet<FString> EnabledPluginDevUIDirs;
+		for (const TSharedRef<IPlugin>& Enabled : IPluginManager::Get().GetEnabledPlugins())
+		{
+			EnabledPluginDevUIDirs.Add(FPaths::ConvertRelativePathToFull(Enabled->GetContentDir() / TEXT("DevUI")));
+		}
+
+		for (int32 Index = 1; Index < Roots.Num() - 1; ++Index)
+		{
+			TestTrue(*FString::Printf(TEXT("Middle root '%s' belongs to an enabled plugin"), *Roots[Index]),
+				EnabledPluginDevUIDirs.Contains(Roots[Index]));
+			TestTrue(*FString::Printf(TEXT("Middle root '%s' exists on disk"), *Roots[Index]),
+				IFileManager::Get().DirectoryExists(*Roots[Index]));
+		}
+	}
+
+	// No duplicates anywhere: ResolveExistingDocument stats every root before reporting a
+	// miss, so a repeated entry is wasted IO on every unresolved path.
+	{
+		TSet<FString> Seen;
+		for (const FString& Root : Roots)
+		{
+			TestTrue(*FString::Printf(TEXT("Root '%s' is listed once"), *Root), !Seen.Contains(Root));
+			Seen.Add(Root);
+		}
+	}
 
 	// The shipped HUD document must resolve, and must resolve to the PLUGIN copy: that is
 	// the concrete claim "the plugin's Content/DevUI is canonical" makes.
@@ -189,7 +227,7 @@ bool FVaCuusContentRootsTest::RunTest(const FString& Parameters)
 	// under both roots with different contents, and the plugin's must win.
 	const FString ProbeName = TEXT("vacuus_root_order_probe.rml.tmptest");
 	const FString PluginProbe = Roots[0] / ProbeName;
-	const FString ProjectProbe = Roots[1] / ProbeName;
+	const FString ProjectProbe = Roots.Last() / ProbeName;
 
 	const bool bWrotePlugin = FFileHelper::SaveStringToFile(TEXT("PLUGIN"), *PluginProbe);
 	const bool bWroteProject = FFileHelper::SaveStringToFile(TEXT("PROJECTROOT"), *ProjectProbe);
@@ -229,13 +267,13 @@ bool FVaCuusContentRootsTest::RunTest(const FString& Parameters)
 
 	// The project DevUI directory may not have existed before this test created the probe
 	// in it (it is deliberately empty in this repo now); leave it as we found it.
-	if (IFileManager::Get().DirectoryExists(*Roots[1]))
+	if (IFileManager::Get().DirectoryExists(*Roots.Last()))
 	{
 		TArray<FString> Remaining;
-		IFileManager::Get().FindFilesRecursive(Remaining, *Roots[1], TEXT("*"), true, true);
+		IFileManager::Get().FindFilesRecursive(Remaining, *Roots.Last(), TEXT("*"), true, true);
 		if (Remaining.Num() == 0)
 		{
-			IFileManager::Get().DeleteDirectory(*Roots[1]);
+			IFileManager::Get().DeleteDirectory(*Roots.Last());
 		}
 	}
 
@@ -337,6 +375,272 @@ bool FVaCuusImageProbeTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("The shipped img/avatar.png probes as Ok"),
 			VaCuusContentPaths::ProbeImage(TEXT("img/avatar.png"), &Diagnosis), EVaCuusImageProbe::Ok);
 	}
+
+	return true;
+}
+
+/**
+ * The ORDER RULE itself, on inputs this test chooses.
+ *
+ * WHY IT IS SEPARATE FROM VaCuus.Core.ContentRoots: tier 2 is auto-discovered, so what
+ * GetDocumentRoots() returns depends on which plugins are installed on the machine running
+ * the suite. A test that can only assert the two ends cannot assert the thing the feature
+ * IS -- that a plugin root sits after VaCuus and before the project, that the order inside
+ * tier 2 is the caller's, and that nothing is listed twice. ComposeDocumentRoots exists to
+ * make those assertable without installing anything.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusContentRootCompositionTest, "VaCuus.Core.ContentRootComposition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVaCuusContentRootCompositionTest::RunTest(const FString& Parameters)
+{
+	const FString VaCuusContent = TEXT("/x/Plugins/VaCuus/Content");
+	const FString PluginAContent = TEXT("/x/Plugins/Aardvark/Content");
+	const FString PluginZContent = TEXT("/x/Plugins/Zebra/Content");
+	const FString ProjectContent = TEXT("/x/Content");
+
+	const auto Root = [](const FString& ContentDir) {
+		return FPaths::ConvertRelativePathToFull(ContentDir / TEXT("DevUI"));
+	};
+
+	// The three tiers, in order, with tier 2 consumed exactly as handed over.
+	{
+		const TArray<FString> Composed = VaCuusContentPaths::ComposeDocumentRoots(
+			VaCuusContent, {PluginAContent, PluginZContent}, ProjectContent);
+
+		if (TestEqual(TEXT("Four roots"), Composed.Num(), 4))
+		{
+			TestEqual(TEXT("VaCuus is first"), Composed[0], Root(VaCuusContent));
+			TestEqual(TEXT("Then the plugins, in the given order"), Composed[1], Root(PluginAContent));
+			TestEqual(TEXT("Then the plugins, in the given order"), Composed[2], Root(PluginZContent));
+			TestEqual(TEXT("The project is last"), Composed.Last(), Root(ProjectContent));
+		}
+	}
+
+	// VaCuus listed again among the plugins must not produce a second root. Not a contrived
+	// case: the discovery scan skips it by name, and this is what says so if that skip is
+	// ever lost.
+	{
+		const TArray<FString> Composed = VaCuusContentPaths::ComposeDocumentRoots(
+			VaCuusContent, {VaCuusContent, PluginAContent}, ProjectContent);
+
+		if (TestEqual(TEXT("The duplicate collapses"), Composed.Num(), 3))
+		{
+			TestEqual(TEXT("VaCuus keeps its FIRST position, not a later one"), Composed[0], Root(VaCuusContent));
+			TestEqual(TEXT("The real plugin follows"), Composed[1], Root(PluginAContent));
+			TestEqual(TEXT("The project is still last"), Composed.Last(), Root(ProjectContent));
+		}
+	}
+
+	// A plugin mounted under the project's own Content directory: one directory, one root,
+	// and it must not be demoted to the project's slot.
+	{
+		const TArray<FString> Composed =
+			VaCuusContentPaths::ComposeDocumentRoots(VaCuusContent, {ProjectContent}, ProjectContent);
+
+		if (TestEqual(TEXT("The shared directory is listed once"), Composed.Num(), 2))
+		{
+			TestEqual(TEXT("VaCuus first"), Composed[0], Root(VaCuusContent));
+			TestEqual(TEXT("The shared root second"), Composed[1], Root(ProjectContent));
+		}
+	}
+
+	// Dedup is case-insensitive because FString equality is: on Windows and macOS the two
+	// spellings ARE one directory, and listing it twice would stat it twice per miss.
+	{
+		const TArray<FString> Composed = VaCuusContentPaths::ComposeDocumentRoots(
+			VaCuusContent, {TEXT("/x/plugins/vacuus/content")}, ProjectContent);
+
+		TestEqual(TEXT("A case-only variant of an existing root is not added"), Composed.Num(), 2);
+	}
+
+	// An empty tier does not shift the others: a missing VaCuus descriptor is a logged Error,
+	// not a reason for the first discovered plugin to inherit tier 1's precedence.
+	{
+		const TArray<FString> Composed =
+			VaCuusContentPaths::ComposeDocumentRoots(FString(), {PluginAContent}, ProjectContent);
+
+		if (TestEqual(TEXT("Two roots when VaCuus has no content dir"), Composed.Num(), 2))
+		{
+			TestEqual(TEXT("The plugin is first"), Composed[0], Root(PluginAContent));
+			TestEqual(TEXT("The project is last"), Composed.Last(), Root(ProjectContent));
+		}
+	}
+
+	TestEqual(TEXT("No roots at all when nothing is supplied"),
+		VaCuusContentPaths::ComposeDocumentRoots(FString(), {}, FString()).Num(), 0);
+
+	return true;
+}
+
+/**
+ * The shadow report, proved by building a shadow and then removing it.
+ *
+ * WHAT IT IS FOR (VaCuusContentPaths.h on ScanShadowedDocuments): a document served by two
+ * roots has exactly one symptom -- the losing copy is never opened, never logged and never
+ * reloaded -- so the report IS the feature. Asserting the count alone would pass on a
+ * function that counted the right number of wrong things, so the normalized path is checked
+ * too.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusShadowedDocumentsTest, "VaCuus.Core.ShadowedDocuments",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVaCuusShadowedDocumentsTest::RunTest(const FString& Parameters)
+{
+	// Two roots of this test's own making, under Saved/: scanning the REAL roots would make
+	// the result depend on what the repo and the machine happen to carry.
+	const FString ScanDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("VaCuusTest") / TEXT("Shadow"));
+	const FString RootA = ScanDir / TEXT("A");
+	const FString RootB = ScanDir / TEXT("B");
+	const TArray<FString> Roots = {RootA, RootB};
+
+	const FString Shared = TEXT("Screens/menu.rml");
+	const FString OnlyInB = TEXT("Screens/only_b.rml");
+
+	const bool bWrote = FFileHelper::SaveStringToFile(TEXT("A"), *(RootA / Shared)) &&
+						FFileHelper::SaveStringToFile(TEXT("B"), *(RootB / Shared)) &&
+						FFileHelper::SaveStringToFile(TEXT("B"), *(RootB / OnlyInB));
+	if (!TestTrue(TEXT("Probe tree written"), bWrote))
+	{
+		IFileManager::Get().DeleteDirectory(*ScanDir, false, true);
+		return false;
+	}
+
+	{
+		TArray<FString> Shadowed;
+		const int32 NumShadowed = VaCuusContentPaths::ScanShadowedDocuments(Roots, &Shadowed);
+
+		TestEqual(TEXT("Exactly one document is shadowed"), NumShadowed, 1);
+		if (TestEqual(TEXT("...and it is reported"), Shadowed.Num(), 1))
+		{
+			// NormalizePath lowercases, so that is the spelling the report carries.
+			TestEqual(TEXT("The shadowed path is the shared one, normalized"), Shadowed[0],
+				VaCuusBundleFormat::NormalizePath(Shared));
+		}
+	}
+
+	// A Tests/ fixture is per-root by design and never addressed by a document, so a
+	// collision between two of them is not a fault. This row is what keeps that exclusion
+	// from being quietly dropped.
+	{
+		const FString Fixture = TEXT("Tests/fixture.rml");
+		if (TestTrue(TEXT("Fixture pair written"),
+				FFileHelper::SaveStringToFile(TEXT("A"), *(RootA / Fixture)) &&
+					FFileHelper::SaveStringToFile(TEXT("B"), *(RootB / Fixture))))
+		{
+			TestEqual(TEXT("A shadowed Tests/ fixture is not reported"),
+				VaCuusContentPaths::ScanShadowedDocuments(Roots), 1);
+		}
+	}
+
+	// RESTORE-THE-BUG, inverted: with the duplicate gone the count must be zero, which is
+	// what proves the 1 above came from the duplication and not from the walk itself.
+	IFileManager::Get().Delete(*(RootA / Shared));
+	{
+		TArray<FString> Shadowed;
+		TestEqual(TEXT("Nothing is shadowed once one copy is deleted"),
+			VaCuusContentPaths::ScanShadowedDocuments(Roots, &Shadowed), 0);
+		TestEqual(TEXT("...and nothing is reported"), Shadowed.Num(), 0);
+	}
+
+	// A root that does not exist is not an error: tiers 1 and 3 are listed unconditionally,
+	// so the scan is handed non-existent directories on an ordinary boot.
+	TestEqual(TEXT("A missing root contributes nothing"),
+		VaCuusContentPaths::ScanShadowedDocuments({ScanDir / TEXT("NoSuchRoot")}), 0);
+
+	IFileManager::Get().DeleteDirectory(*ScanDir, false, true);
+	return true;
+}
+
+/**
+ * A PLUGIN root, end to end: discovered, served, precedent over the project, and packed.
+ *
+ * SKIPS RATHER THAN FAILS when no plugin root exists, and that is the honest shape: the test
+ * cannot install a plugin, and the host project for this plugin need not ship one. In a project
+ * where some other plugin does carry a Content/DevUI, this is the proof that the whole chain
+ * works -- which is why the skip says so by name rather than passing silently.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusPluginDocumentRootTest, "VaCuus.Core.PluginDocumentRoot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVaCuusPluginDocumentRootTest::RunTest(const FString& Parameters)
+{
+	const TArray<FString>& Roots = VaCuusContentPaths::GetDocumentRoots();
+	if (Roots.Num() < 3)
+	{
+		AddInfo(TEXT("Skipped: no plugin other than VaCuus has a Content/DevUI directory in this project, ")
+				TEXT("so there is no tier-2 root to serve from"));
+		return true;
+	}
+
+	const FString PluginRoot = Roots[1];
+	const FString ProjectRoot = Roots.Last();
+
+	// ".tmptest" keeps it out of every staging glob and out of GetPackedExtensions, so a
+	// crashed run cannot leave a file the cooker would pick up.
+	const FString ProbeName = TEXT("vacuus_plugin_root_probe.rml.tmptest");
+	const FString PluginProbe = PluginRoot / ProbeName;
+	const FString ProjectProbe = ProjectRoot / ProbeName;
+
+	// 12 bytes vs 7: length is the discriminator, as in VaCuus.Core.ContentRoots.
+	const bool bWrote = FFileHelper::SaveStringToFile(TEXT("PLUGINROOTED"), *PluginProbe) &&
+						FFileHelper::SaveStringToFile(TEXT("PROJECT"), *ProjectProbe);
+	if (TestTrue(TEXT("Probe written under the plugin root and the project root"), bWrote))
+	{
+		FVaCuusFileInterface FileInterface;
+		const auto ToRmlPath = [](const FString& Path) { return Rml::String(TCHAR_TO_UTF8(*Path)); };
+
+		const Rml::FileHandle Handle = FileInterface.Open(ToRmlPath(ProbeName));
+		if (TestTrue(TEXT("A document in a plugin's Content/DevUI opens through the VFS"),
+				Handle != Rml::FileHandle(0)))
+		{
+			TestEqual(TEXT("The PLUGIN copy wins over the project's"), FileInterface.Length(Handle), (size_t)12);
+			FileInterface.Close(Handle);
+		}
+
+		FString SatisfyingRoot;
+		VaCuusContentPaths::ResolveExistingDocument(ProbeName, &SatisfyingRoot);
+		TestEqual(TEXT("...and the resolver names that plugin root"), SatisfyingRoot, PluginRoot);
+	}
+
+	IFileManager::Get().Delete(*PluginProbe);
+	IFileManager::Get().Delete(*ProjectProbe);
+
+#if WITH_EDITOR
+	// THE PACKAGING HALF, and the reason it is in this test rather than left to a cook: the
+	// bundle is what serves a Shipping build, so "the plugin root is a document root" is only
+	// half true until the pack claims a file from it. EnumerateTree walks the same list.
+	//
+	// THIS PROBE BREAKS THE `.tmptest` CONVENTION ON PURPOSE, and it is the only one in the
+	// suite that does: GetPackedExtensions() is exactly what EnumerateTree matches on, so a
+	// probe the pack can see MUST carry a real extension. The cost is that a crashed run can
+	// leave a six-byte `.rml` in a consuming plugin's tree. Accepted because the next startup
+	// reports it (ScanShadowedDocuments walks that root) and because the alternative -- handing
+	// EnumerateTree a temporary root of our own -- would prove something about EnumerateTree,
+	// which is already tested, rather than about the PLUGIN root being in the list it is given.
+	{
+		const FString PackProbeName = TEXT("vacuus_plugin_root_pack_probe.rml");
+		const FString PackProbe = PluginRoot / PackProbeName;
+		if (TestTrue(TEXT("Pack probe written under the plugin root"),
+				FFileHelper::SaveStringToFile(TEXT("<rml/>"), *PackProbe)))
+		{
+			const FString Expected = VaCuusBundleFormat::NormalizePath(PackProbeName);
+			bool bFound = false;
+			for (const VaCuusBundlePack::FSourceFile& File : VaCuusBundlePack::EnumerateTree(Roots))
+			{
+				if (File.NormalizedPath == Expected)
+				{
+					bFound = true;
+					TestEqual(TEXT("...claimed from the plugin root's copy"),
+						File.DiskPath, FPaths::ConvertRelativePathToFull(PackProbe));
+					break;
+				}
+			}
+			TestTrue(TEXT("The bundle pack claims a document from the plugin root"), bFound);
+		}
+		IFileManager::Get().Delete(*PackProbe);
+	}
+#endif // WITH_EDITOR
 
 	return true;
 }

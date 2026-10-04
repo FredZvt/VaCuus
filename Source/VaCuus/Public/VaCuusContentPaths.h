@@ -23,19 +23,53 @@
  * on screen. The log line every reload emits names the absolute root it resolved to --
  * read it before concluding that live reload is broken. Code cannot fix two clones.
  *
- * THE ROOT ORDER IS PLUGIN-FIRST, and that is the decision, not an accident:
+ * THE ROOT ORDER IS PLUGINS-FIRST, and that is the decision, not an accident:
  *
- *   1. <Plugin>/Content/DevUI   -- canonical, git-tracked, what the watcher watches
- *   2. <Project>/Content/DevUI  -- optional, for documents a project adds itself
+ *   1. <VaCuus>/Content/DevUI       -- canonical, git-tracked, what the watcher watches
+ *   2. <OtherPlugin>/Content/DevUI  -- every OTHER enabled plugin that has one, by plugin name
+ *   3. <Project>/Content/DevUI      -- optional, for documents a project adds itself
  *
- * A CONSEQUENCE WORTH STATING PLAINLY: with the plugin first, a project CANNOT
- * shadow a document the plugin ships by putting a same-named file in its own
+ * A CONSEQUENCE WORTH STATING PLAINLY: with the plugins first, a project CANNOT
+ * shadow a document a plugin ships by putting a same-named file in its own
  * Content/DevUI -- the plugin copy wins. The project root is an EXTENSION point, not
  * an override point. That is the right trade for M2: a project-first order would let
  * exactly the stale-duplicate bug this decision exists to kill come back (a forgotten
  * project copy would silently shadow the plugin document the watcher is watching, and
  * live reload would appear broken). Per-document overriding, if it is ever wanted,
  * belongs in a project setting rather than in path precedence.
+ *
+ * TIER 2 IS AUTO-DISCOVERED, AND EXISTENCE-GATED, which is the one asymmetry in the list:
+ * tiers 1 and 3 are listed whether or not they exist on disk, while a plugin earns a root
+ * only by actually having the directory. That is a cost argument, not a tidiness one --
+ * IPluginManager::GetEnabledPlugins() routinely returns a hundred-odd plugins, and
+ * ResolveExistingDocument() stats every root before it reports a miss, so listing them
+ * unconditionally would put ~100 FileExists calls behind every unresolved path. The gate
+ * answers honestly in a packaged build too: the pak platform file is installed in
+ * PreInitPreStartupScreen (LaunchEngineLoop.cpp:2135) long before this module's Default
+ * loading phase (:4682), and FPakPlatformFile::DirectoryExists consults the mounted pak's
+ * directory index (IPlatformFilePak.cpp:5471) before the lower level.
+ *
+ * TWO CONSEQUENCES OF THE GATE, both of which are "read the log", not "file a bug":
+ *   - The list is resolved ONCE per process (see GetDocumentRoots below). A DevUI directory
+ *     created after launch is not a root until the next restart.
+ *   - Shipping PRUNES the pak directory index, so a plugin root can fail the gate there and
+ *     drop off the list. Harmless -- Shipping serves the cooked bundle and stages no loose
+ *     DevUI files at all -- but it does mean a Shipping log line naming the roots can name
+ *     fewer than the editor did.
+ *
+ * WHAT A CONSUMING PLUGIN STILL OWES, because none of it can be done from inside VaCuus:
+ *   - STAGING its own loose files, for a packaged non-Shipping build. VaCuus's own
+ *     RuntimeDependencies globs are anchored at ITS $(PluginDir), and
+ *     ProjectPackagingSettings' DirectoriesToAlwaysStageAsUFS resolves against the PROJECT's
+ *     content root (CopyBuildToStagingDirectory.Automation.cs:2054), so neither reaches a
+ *     third plugin. The route is VaCuus.StageDevUI(this, Target, "$(PluginDir)/Content/DevUI")
+ *     from the consuming module's own .Build.cs -- see Source/VaCuus/VaCuus.Build.cs.
+ *   - NOTHING for the bundle, which is the good news: the pack, the cook-dependency tree hash
+ *     and the PIE pack-on-demand all walk THIS list (VaCuusBundle.cpp, VaCuusBundleMount.cpp),
+ *     so a plugin's documents are inside the cooked bundle automatically, and editing one
+ *     invalidates the bundle package. A plugin cannot ship a bundle of its own, though: there
+ *     is one per project, named by [VaCuus] BundleAssetPath, so the CONSUMING PROJECT must
+ *     have wired that up (docs/buyer/setup.md section 3) or Shipping has no UI to serve.
  *
  * NOT EDITOR-ONLY: IPlugin::GetContentDir() is `FPaths::GetPath(FileName)/Content`
  * (PluginManager.cpp:406-409) in the Runtime `Projects` module, so a packaged game
@@ -73,18 +107,60 @@ enum class EVaCuusImageProbe : uint8
 namespace VaCuusContentPaths
 {
 /**
- * The ordered DevUI roots, absolute and normalised, plugin first (see above).
+ * The ordered DevUI roots, absolute, plugins first (see above).
  *
- * Resolved once, on first call, and cached: FindPlugin() is a map lookup into state
- * that is fixed after plugin discovery, but it is not documented as thread-safe and
- * this is called from the UI thread. FVaCuusModule::StartupModule() primes the cache
+ * Resolved once, on first call, and cached: FindPlugin() and GetEnabledPlugins() read
+ * state that is fixed after plugin discovery, but neither is documented as thread-safe
+ * and this is called from the UI thread. FVaCuusModule::StartupModule() primes the cache
  * on the game thread so the first UI-thread call can never be the one that races
  * plugin mounting.
  *
- * A root is listed whether or not it exists on disk; callers that need existence say
- * so (ResolveExistingDocument, or IFileManager::DirectoryExists for a watch root).
+ * Tiers 1 and 3 are listed whether or not they exist on disk; tier 2 is existence-gated
+ * at resolve time (see above). Callers that need existence of a listed root say so
+ * (ResolveExistingDocument, or IFileManager::DirectoryExists for a watch root).
  */
 VACUUS_API const TArray<FString>& GetDocumentRoots();
+
+/**
+ * The ORDER RULE as a pure function: each content directory gets `/DevUI` appended, is
+ * made absolute, and is appended unless an equal root is already present. OtherPluginContentDirs
+ * is consumed in the order given -- the caller owns the plugin-name sort, because the
+ * discovery that produces that list is what has the names.
+ *
+ * It exists to be TESTED. The composition rule is the whole feature and the only other way
+ * to exercise it is to install a second plugin with a DevUI directory on the test machine,
+ * which is a thing a test cannot do; GetDocumentRoots() can then only be asserted against
+ * whatever that machine happens to have. An empty input directory contributes nothing, so a
+ * missing VaCuus descriptor does not shift tier 2 into tier 1's slot.
+ *
+ * Dedup is FString equality, i.e. CASE-INSENSITIVE, which is deliberate: on Windows and
+ * macOS two spellings of one directory are one directory, and listing it twice would stat
+ * it twice per miss for no possible gain.
+ */
+VACUUS_API TArray<FString> ComposeDocumentRoots(const FString& VaCuusContentDir,
+	const TArray<FString>& OtherPluginContentDirs, const FString& ProjectContentDir);
+
+/**
+ * Names every document that MORE THAN ONE root serves, and returns how many there were.
+ *
+ * WHY IT EXISTS: with two roots, shadowing was a two-party accident a developer could hold
+ * in their head, and D19 above argues the precedence at length. With a root per plugin it is
+ * an N-party one, and the failure mode is the quietest in the whole VFS -- the losing copy is
+ * never opened, never logged and never reloaded, so an edit to it does nothing at all and the
+ * document on screen is someone else's. One Warning per shadowed path, naming both disk paths
+ * and which one answers, is what turns that into a readable failure.
+ *
+ * The same rule the pack enforces, on the same inputs: GetPackedExtensions(), NormalizePath()
+ * (so a case-only difference IS a collision) and IsExcludedTestPath() come from
+ * VaCuusBundleFormat, and first-root-wins matches both FVaCuusFileInterface::Open and
+ * VaCuusBundlePack::EnumerateTree. The pack already reports its own shadows, but only at pack
+ * time and only WITH_EDITOR, which is no help to a packaged Development build.
+ *
+ * Costs one recursive directory walk per existing root, so it is called ONCE, from
+ * FVaCuusModule::StartupModule(), and not in Shipping. OutShadowedPaths, when supplied,
+ * receives the normalized path of every loser -- the observable the test asserts on.
+ */
+VACUUS_API int32 ScanShadowedDocuments(const TArray<FString>& Roots, TArray<FString>* OutShadowedPaths = nullptr);
 
 /**
  * Where VfsPath would be served from, or an empty string when nowhere: the mounted
