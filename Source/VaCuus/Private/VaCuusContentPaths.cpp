@@ -143,26 +143,28 @@ TArray<FString> ComposeDocumentRoots(const FString& VaCuusContentDir,
 	TArray<FString> Roots;
 	Roots.Reserve(OtherPluginContentDirs.Num() + 2);
 
-	// AddUnique everywhere, including tier 1: a plugin whose content directory IS the
-	// project's (a plugin mounted under <Project>/Content, which the engine permits) must not
-	// put the same root in the list twice.
-	if (!VaCuusContentDir.IsEmpty())
-	{
-		Roots.AddUnique(Private::ToDevUIRoot(VaCuusContentDir));
-	}
-
-	for (const FString& ContentDir : OtherPluginContentDirs)
-	{
+	// FString equality ignores case (UnrealString.h.inl:906-915), but physical roots
+	// can be distinct on a case-sensitive volume. Keeping two aliases costs a lookup;
+	// folding two different directories loses files from the cooked bundle.
+	const auto AddRoot = [&Roots](const FString& ContentDir) {
 		if (!ContentDir.IsEmpty())
 		{
-			Roots.AddUnique(Private::ToDevUIRoot(ContentDir));
+			const FString Root = Private::ToDevUIRoot(ContentDir);
+			if (!Roots.ContainsByPredicate([&Root](const FString& Existing) {
+					return Existing.Equals(Root, ESearchCase::CaseSensitive);
+				}))
+			{
+				Roots.Add(Root);
+			}
 		}
-	}
+	};
 
-	if (!ProjectContentDir.IsEmpty())
+	AddRoot(VaCuusContentDir);
+	for (const FString& ContentDir : OtherPluginContentDirs)
 	{
-		Roots.AddUnique(Private::ToDevUIRoot(ProjectContentDir));
+		AddRoot(ContentDir);
 	}
+	AddRoot(ProjectContentDir);
 
 	return Roots;
 }
@@ -237,9 +239,8 @@ int32 ScanShadowedDocuments(const TArray<FString>& Roots, TArray<FString>* OutSh
 
 	IFileManager& FileManager = IFileManager::Get();
 
-	// Normalized path -> the disk path of the root that WINS it. First claim wins, which is
-	// what makes this report agree with FVaCuusFileInterface::Open rather than merely
-	// resemble it.
+	// Predict the pack's winner. Loose opens preserve the requested spelling, so
+	// case-only variants can still be read separately on a case-sensitive volume.
 	TMap<FString, FString> ClaimedBy;
 	int32 NumShadowed = 0;
 
@@ -286,14 +287,9 @@ int32 ScanShadowedDocuments(const TArray<FString>& Roots, TArray<FString>* OutSh
 
 			if (const FString* Winner = ClaimedBy.Find(NormalizedPath))
 			{
-				// The whole point of the function. Both disk paths, because "which copy" is
-				// the question a reader actually has, and the consequence spelled out
-				// because the shadowed file produces no other symptom: no open, no log, no
-				// reload.
 				UE_LOG(LogVaCuus, Warning,
-					TEXT("Document '%s' is SHADOWED: '%s' is what every request gets, and '%s' is never opened -- ")
-					TEXT("an edit to it does nothing at all. Earlier roots win (VaCuusContentPaths.h); rename one ")
-					TEXT("copy or delete it"),
+					TEXT("Bundle path '%s' has a collision: '%s' wins when packed; '%s' is excluded from the bundle. ")
+					TEXT("Loose-file lookup can differ, especially for case-only names. Rename one copy to pack both"),
 					*NormalizedPath, **Winner, *FullPath);
 
 				++NumShadowed;
@@ -311,7 +307,7 @@ int32 ScanShadowedDocuments(const TArray<FString>& Roots, TArray<FString>* OutSh
 	// Logged at Log even on zero: it is the line that proves the scan RAN. Without it, a tree
 	// with no duplicates and a scan that silently found no directories to walk at all read
 	// identically -- and the second is what a regression in the root list would look like.
-	UE_LOG(LogVaCuus, Log, TEXT("VaCuus document shadow scan: %d document(s) served by more than one root (%d total)"),
+	UE_LOG(LogVaCuus, Log, TEXT("VaCuus document shadow scan: %d file(s) excluded by bundle-path collisions (%d total)"),
 		NumShadowed, ClaimedBy.Num() + NumShadowed);
 
 	return NumShadowed;

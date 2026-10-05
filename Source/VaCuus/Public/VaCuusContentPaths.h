@@ -52,10 +52,9 @@
  * TWO CONSEQUENCES OF THE GATE, both of which are "read the log", not "file a bug":
  *   - The list is resolved ONCE per process (see GetDocumentRoots below). A DevUI directory
  *     created after launch is not a root until the next restart.
- *   - Shipping PRUNES the pak directory index, so a plugin root can fail the gate there and
- *     drop off the list. Harmless -- Shipping serves the cooked bundle and stages no loose
- *     DevUI files at all -- but it does mean a Shipping log line naming the roots can name
- *     fewer than the editor did.
+ *   - A pruned pak directory index can hide staged directories from the gate. Loose-file
+ *     development therefore needs those directories retained in the index. Shipping serves
+ *     the cooked bundle and stages no loose DevUI, so fewer roots there are harmless.
  *
  * WHAT A CONSUMING PLUGIN STILL OWES, because none of it can be done from inside VaCuus:
  *   - STAGING its own loose files, for a packaged non-Shipping build. VaCuus's own
@@ -127,36 +126,29 @@ VACUUS_API const TArray<FString>& GetDocumentRoots();
  * is consumed in the order given -- the caller owns the plugin-name sort, because the
  * discovery that produces that list is what has the names.
  *
- * It exists to be TESTED. The composition rule is the whole feature and the only other way
- * to exercise it is to install a second plugin with a DevUI directory on the test machine,
- * which is a thing a test cannot do; GetDocumentRoots() can then only be asserted against
- * whatever that machine happens to have. An empty input directory contributes nothing, so a
- * missing VaCuus descriptor does not shift tier 2 into tier 1's slot.
+ * Empty input directories contribute nothing. The pure composition test does not need
+ * installed plugins; Tools/plugin_roots_check.py supplies real plugins before startup for
+ * the discovery and VFS tests.
  *
- * Dedup is FString equality, i.e. CASE-INSENSITIVE, which is deliberate: on Windows and
- * macOS two spellings of one directory are one directory, and listing it twice would stat
- * it twice per miss for no possible gain.
+ * Dedup compares absolute paths CASE-SENSITIVELY. Case-only directory names can identify
+ * different physical roots; preserving an alias on a case-insensitive volume is preferable
+ * to dropping a distinct root, including its unique files, on a case-sensitive one.
  */
 VACUUS_API TArray<FString> ComposeDocumentRoots(const FString& VaCuusContentDir,
 	const TArray<FString>& OtherPluginContentDirs, const FString& ProjectContentDir);
 
 /**
- * Names every document that MORE THAN ONE root serves, and returns how many there were.
- *
- * WHY IT EXISTS: with two roots, shadowing was a two-party accident a developer could hold
- * in their head, and D19 above argues the precedence at length. With a root per plugin it is
- * an N-party one, and the failure mode is the quietest in the whole VFS -- the losing copy is
- * never opened, never logged and never reloaded, so an edit to it does nothing at all and the
- * document on screen is someone else's. One Warning per shadowed path, naming both disk paths
- * and which one answers, is what turns that into a readable failure.
+ * Reports files whose normalized paths collide in a bundle, including case-only variants
+ * inside a single root. Returns the number of files the pack would exclude.
  *
  * The same rule the pack enforces, on the same inputs: GetPackedExtensions(), NormalizePath()
  * (so a case-only difference IS a collision) and IsExcludedTestPath() come from
- * VaCuusBundleFormat, and first-root-wins matches both FVaCuusFileInterface::Open and
- * VaCuusBundlePack::EnumerateTree. The pack already reports its own shadows, but only at pack
- * time and only WITH_EDITOR, which is no help to a packaged Development build.
+ * VaCuusBundleFormat. The winner matches VaCuusBundlePack::EnumerateTree; it does not promise
+ * which loose file every request opens. Loose lookups preserve spelling, and absolute paths
+ * bypass root precedence. Reporting the bundle collision at startup exposes an editor/package
+ * difference before cook; the pack's own diagnostics are only available WITH_EDITOR.
  *
- * Costs one recursive directory walk per existing root, so it is called ONCE, from
+ * Walks each root once per packed extension, so it is called ONCE, from
  * FVaCuusModule::StartupModule(), and not in Shipping. OutShadowedPaths, when supplied,
  * receives the normalized path of every loser -- the observable the test asserts on.
  */

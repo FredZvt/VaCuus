@@ -165,14 +165,11 @@ public class VaCuus : ModuleRules
 	 *
 	 *     VaCuus.StageDevUI(this, Target, "$(PluginDir)/Content/DevUI");
 	 *
-	 * WHY IT IS PUBLIC AND WHY THERE IS NO OTHER ROUTE. Every .Build.cs in a target compiles
-	 * into one rules assembly, so a module that depends on VaCuus can call this directly --
-	 * and nothing else it could write would work. The globs above expand relative to the
-	 * calling module's $(PluginDir), so VaCuus cannot stage another plugin's files on its
-	 * behalf; and ProjectPackagingSettings' DirectoriesToAlwaysStageAsUFS resolves its entries
-	 * against the PROJECT's content root (CopyBuildToStagingDirectory.Automation.cs:2054),
-	 * never a plugin's. A plugin that ships documents and does not call this gets a packaged
-	 * Development build with its UI missing and one Warning per file at load.
+	 * A consuming module calls the helper so the globs expand against its own $(PluginDir).
+	 * This shares VaCuus's extension list and Shipping gate without duplicating staging rules.
+	 * ProjectPackagingSettings' DirectoriesToAlwaysStageAsUFS resolves against the PROJECT's
+	 * content root (CopyBuildToStagingDirectory.Automation.cs:2054), so that setting does not
+	 * automatically stage a consuming plugin's documents for loose-file development.
 	 *
 	 * IT IS NOT NEEDED FOR SHIPPING, and the gate below is not a convenience: Shipping serves
 	 * the cooked UVaCuusBundle only (spec M6 2(d)), the pack already walks every document root

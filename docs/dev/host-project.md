@@ -32,6 +32,18 @@ semicolons):
 
 No editor may be running while you build — it holds the module `.so` files open.
 
+To verify discovery of other plugins' document roots, build the editor and run:
+
+```bash
+python3 Tools/plugin_roots_check.py /w/Unreal/UnrealEngine /w/Unreal/VcHost/VcHost.uproject
+```
+
+This Linux check installs temporary content-only plugins before editor startup, including
+two roots whose directories differ only by case when the filesystem permits it. It verifies
+the core automation tests ran without skipping plugin discovery, reads results from a dedicated
+log under `Saved/Logs`, stops its editor by PID, and removes its fixtures. Pass `--filter VaCuus`
+to run the full suite with these roots. It requires an existing editor build and Python 3.
+
 `CLAUDE.md` carries the rest of the dev-loop hazards; this page is the part about the
 tree layout itself.
 

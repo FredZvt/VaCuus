@@ -15,6 +15,29 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+namespace
+{
+// Read plugin metadata independently: deriving fixture availability from GetDocumentRoots
+// would turn a discovery regression into a successful skip.
+TArray<FString> GetExpectedPluginRoots()
+{
+	TArray<TSharedRef<IPlugin>> Plugins = IPluginManager::Get().GetEnabledPlugins();
+	Plugins.Sort([](const TSharedRef<IPlugin>& A, const TSharedRef<IPlugin>& B) {
+		return FCString::Strcmp(*A->GetName(), *B->GetName()) < 0;
+	});
+	TArray<FString> Expected;
+	for (const TSharedRef<IPlugin>& Plugin : Plugins)
+	{
+		const FString Root = FPaths::ConvertRelativePathToFull(Plugin->GetContentDir() / TEXT("DevUI"));
+		if (Plugin->GetName() != TEXT("VaCuus") && IFileManager::Get().DirectoryExists(*Root))
+		{
+			Expected.Add(Root);
+		}
+	}
+	return Expected;
+}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusFileInterfaceTest, "VaCuus.Core.FileInterface",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -154,12 +177,9 @@ bool FVaCuusFileInterfaceTest::RunTest(const FString& Parameters)
  * the editor file watcher is watching -- live reload would stop working with no error
  * anywhere. So the order is asserted, not just the resolution.
  *
- * WHAT IT CANNOT ASSERT ANY MORE, and why that is not a loss: the COUNT. Tier 2 is every
- * other enabled plugin that has a Content/DevUI, so the number of roots is a property of
- * the machine this runs on, not of the code. The two ENDS are still the contract -- VaCuus
- * first, the project last -- and they are what every precedence claim rests on, so they are
- * asserted here; the composition rule itself has its own test
- * (VaCuus.Core.ContentRootComposition) which does not depend on what is installed.
+ * Discovery is checked against enabled plugin metadata, including completeness and
+ * name order. Tools/plugin_roots_check.py installs companion plugins before startup
+ * so this path cannot go unexercised in a host containing only VaCuus.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusContentRootsTest, "VaCuus.Core.ContentRoots",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -186,33 +206,27 @@ bool FVaCuusContentRootsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The FIRST root is VaCuus's own Content/DevUI"), Roots[0], ExpectedPluginRoot);
 	TestEqual(TEXT("The LAST root is the PROJECT's Content/DevUI"), Roots.Last(), ExpectedProjectRoot);
 
-	// Every root between them must be a real plugin's DevUI directory that EXISTS -- the
-	// existence gate is the only thing keeping this list short, and a regression that dropped
-	// it would show up here as a middle root nothing is at.
+	// Check completeness as well as membership: a resolver that drops every extra
+	// plugin must fail even though its surviving roots are individually valid.
+	TArray<FString> ExpectedRoots = {ExpectedPluginRoot};
+	TArray<FString> RemainingRoots = GetExpectedPluginRoots();
+	RemainingRoots.Add(ExpectedProjectRoot);
+	for (const FString& Root : RemainingRoots)
 	{
-		TSet<FString> EnabledPluginDevUIDirs;
-		for (const TSharedRef<IPlugin>& Enabled : IPluginManager::Get().GetEnabledPlugins())
+		if (!ExpectedRoots.ContainsByPredicate([&Root](const FString& Existing) {
+				return Existing.Equals(Root, ESearchCase::CaseSensitive);
+			}))
 		{
-			EnabledPluginDevUIDirs.Add(FPaths::ConvertRelativePathToFull(Enabled->GetContentDir() / TEXT("DevUI")));
-		}
-
-		for (int32 Index = 1; Index < Roots.Num() - 1; ++Index)
-		{
-			TestTrue(*FString::Printf(TEXT("Middle root '%s' belongs to an enabled plugin"), *Roots[Index]),
-				EnabledPluginDevUIDirs.Contains(Roots[Index]));
-			TestTrue(*FString::Printf(TEXT("Middle root '%s' exists on disk"), *Roots[Index]),
-				IFileManager::Get().DirectoryExists(*Roots[Index]));
+			ExpectedRoots.Add(Root);
 		}
 	}
-
-	// No duplicates anywhere: ResolveExistingDocument stats every root before reporting a
-	// miss, so a repeated entry is wasted IO on every unresolved path.
+	if (TestEqual(TEXT("All eligible plugin roots are discovered, without duplicates"), Roots.Num(), ExpectedRoots.Num()))
 	{
-		TSet<FString> Seen;
-		for (const FString& Root : Roots)
+		for (int32 Index = 0; Index < Roots.Num(); ++Index)
 		{
-			TestTrue(*FString::Printf(TEXT("Root '%s' is listed once"), *Root), !Seen.Contains(Root));
-			Seen.Add(Root);
+			TestTrue(*FString::Printf(TEXT("Root %d preserves plugin-name order and path case: expected '%s', got '%s'"),
+				Index, *ExpectedRoots[Index], *Roots[Index]),
+				Roots[Index].Equals(ExpectedRoots[Index], ESearchCase::CaseSensitive));
 		}
 	}
 
@@ -445,14 +459,41 @@ bool FVaCuusContentRootCompositionTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Dedup is case-insensitive because FString equality is: on Windows and macOS the two
-	// spellings ARE one directory, and listing it twice would stat it twice per miss.
+	// A different spelling can be a different physical root; preserve it even on
+	// machines where this particular fixture would alias the original directory.
+	{
+		const FString CaseVariant = TEXT("/x/plugins/vacuus/content");
+		const TArray<FString> Composed = VaCuusContentPaths::ComposeDocumentRoots(
+			VaCuusContent, {CaseVariant}, ProjectContent);
+
+		if (TestEqual(TEXT("Case-only root variants are preserved"), Composed.Num(), 3))
+		{
+			TestTrue(TEXT("The additional root keeps its spelling"),
+				Composed[1].Equals(Root(CaseVariant), ESearchCase::CaseSensitive));
+		}
+	}
+
+#if WITH_EDITOR
+	// Exercise the consumer that loses data when two physical roots are folded together.
+	const FString CaseDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("VaCuusTest/CaseRoots"));
+	const FString UpperContent = CaseDir / TEXT("Plugin/Content");
+	const FString LowerContent = CaseDir / TEXT("plugin/Content");
+	if (TestTrue(TEXT("Case-root pack fixtures written"),
+			FFileHelper::SaveStringToFile(TEXT("UPPER"), *(Root(UpperContent) / TEXT("upper_unique.rml"))) &&
+			FFileHelper::SaveStringToFile(TEXT("lower"), *(Root(LowerContent) / TEXT("lower_unique.rml")))))
 	{
 		const TArray<FString> Composed = VaCuusContentPaths::ComposeDocumentRoots(
-			VaCuusContent, {TEXT("/x/plugins/vacuus/content")}, ProjectContent);
-
-		TestEqual(TEXT("A case-only variant of an existing root is not added"), Composed.Num(), 2);
+			FString(), {UpperContent, LowerContent}, FString());
+		const TArray<VaCuusBundlePack::FSourceFile> Files = VaCuusBundlePack::EnumerateTree(Composed);
+		TestTrue(TEXT("Upper root's unique file reaches the bundle"), Files.ContainsByPredicate([](const auto& File) {
+			return File.NormalizedPath == TEXT("upper_unique.rml");
+		}));
+		TestTrue(TEXT("Lower root's unique file reaches the bundle"), Files.ContainsByPredicate([](const auto& File) {
+			return File.NormalizedPath == TEXT("lower_unique.rml");
+		}));
 	}
+	IFileManager::Get().DeleteDirectory(*CaseDir, false, true);
+#endif
 
 	// An empty tier does not shift the others: a missing VaCuus descriptor is a logged Error,
 	// not a reason for the first discovered plugin to inherit tier 1's precedence.
@@ -473,15 +514,7 @@ bool FVaCuusContentRootCompositionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-/**
- * The shadow report, proved by building a shadow and then removing it.
- *
- * WHAT IT IS FOR (VaCuusContentPaths.h on ScanShadowedDocuments): a document served by two
- * roots has exactly one symptom -- the losing copy is never opened, never logged and never
- * reloaded -- so the report IS the feature. Asserting the count alone would pass on a
- * function that counted the right number of wrong things, so the normalized path is checked
- * too.
- */
+/** Bundle collision diagnostics must not claim that a loose file is unreachable. */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusShadowedDocumentsTest, "VaCuus.Core.ShadowedDocuments",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -505,6 +538,9 @@ bool FVaCuusShadowedDocumentsTest::RunTest(const FString& Parameters)
 		IFileManager::Get().DeleteDirectory(*ScanDir, false, true);
 		return false;
 	}
+
+	AddExpectedMessagePlain(TEXT("Bundle path 'screens/menu.rml' has a collision:"),
+		ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 2);
 
 	{
 		TArray<FString> Shadowed;
@@ -533,14 +569,42 @@ bool FVaCuusShadowedDocumentsTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// RESTORE-THE-BUG, inverted: with the duplicate gone the count must be zero, which is
-	// what proves the 1 above came from the duplication and not from the walk itself.
+	// Deleting one copy removes the collision without removing the remaining document.
 	IFileManager::Get().Delete(*(RootA / Shared));
 	{
 		TArray<FString> Shadowed;
 		TestEqual(TEXT("Nothing is shadowed once one copy is deleted"),
 			VaCuusContentPaths::ScanShadowedDocuments(Roots, &Shadowed), 0);
 		TestEqual(TEXT("...and nothing is reported"), Shadowed.Num(), 0);
+	}
+
+	// These distinct paths work on case-insensitive volumes too. Normalization folds
+	// their VFS names together, while the file interface can still open either loose file.
+	const FString Upper = RootA / TEXT("CaseOnly/Panel.rml");
+	const FString Lower = RootB / TEXT("CaseOnly/panel.rml");
+	if (TestTrue(TEXT("Case-only collision fixtures written"),
+			FFileHelper::SaveStringToFile(TEXT("A"), *Upper) &&
+			FFileHelper::SaveStringToFile(TEXT("lower"), *Lower)))
+	{
+		AddExpectedMessagePlain(
+			FString::Printf(TEXT("Bundle path 'caseonly/panel.rml' has a collision: '%s' wins when packed; ")
+				TEXT("'%s' is excluded from the bundle. Loose-file lookup can differ, especially for case-only names."),
+				*Upper, *Lower), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+		TArray<FString> Shadowed;
+		TestEqual(TEXT("Case-only VFS names collide in the bundle"),
+			VaCuusContentPaths::ScanShadowedDocuments(Roots, &Shadowed), 1);
+		if (TestEqual(TEXT("The normalized collision is reported"), Shadowed.Num(), 1))
+		{
+			TestTrue(TEXT("Collision path is lowercase"),
+				Shadowed[0].Equals(TEXT("caseonly/panel.rml"), ESearchCase::CaseSensitive));
+		}
+		FVaCuusFileInterface FileInterface;
+		const Rml::FileHandle Handle = FileInterface.Open(Rml::String(TCHAR_TO_UTF8(*Lower)));
+		if (TestTrue(TEXT("The bundle-excluded copy remains readable loose"), Handle != Rml::FileHandle(0)))
+		{
+			TestEqual(TEXT("Loose read returns the excluded copy's bytes"), FileInterface.Length(Handle), size_t(5));
+			FileInterface.Close(Handle);
+		}
 	}
 
 	// A root that does not exist is not an error: tiers 1 and 3 are listed unconditionally,
@@ -555,10 +619,8 @@ bool FVaCuusShadowedDocumentsTest::RunTest(const FString& Parameters)
 /**
  * A PLUGIN root, end to end: discovered, served, precedent over the project, and packed.
  *
- * SKIPS RATHER THAN FAILS when no plugin root exists, and that is the honest shape: the test
- * cannot install a plugin, and the host project for this plugin need not ship one. In a project
- * where some other plugin does carry a Content/DevUI, this is the proof that the whole chain
- * works -- which is why the skip says so by name rather than passing silently.
+ * Fixture availability comes from plugin metadata, never the root list under test.
+ * Tools/plugin_roots_check.py supplies companion plugins before the process starts.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusPluginDocumentRootTest, "VaCuus.Core.PluginDocumentRoot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -566,15 +628,23 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusPluginDocumentRootTest, "VaCuus.Core.Plu
 bool FVaCuusPluginDocumentRootTest::RunTest(const FString& Parameters)
 {
 	const TArray<FString>& Roots = VaCuusContentPaths::GetDocumentRoots();
-	if (Roots.Num() < 3)
+	const TArray<FString> ExpectedPluginRoots = GetExpectedPluginRoots();
+	if (ExpectedPluginRoots.IsEmpty())
 	{
-		AddInfo(TEXT("Skipped: no plugin other than VaCuus has a Content/DevUI directory in this project, ")
-				TEXT("so there is no tier-2 root to serve from"));
+		AddInfo(TEXT("Skipped: enabled plugin metadata contains no additional DevUI directory. ")
+			TEXT("Run Tools/plugin_roots_check.py to supply companion plugins"));
 		return true;
 	}
 
-	const FString PluginRoot = Roots[1];
-	const FString ProjectRoot = Roots.Last();
+	const FString PluginRoot = ExpectedPluginRoots[0];
+	if (!TestTrue(TEXT("The independently identified plugin root is discovered"),
+			Roots.ContainsByPredicate([&PluginRoot](const FString& Root) {
+				return Root.Equals(PluginRoot, ESearchCase::CaseSensitive);
+			})))
+	{
+		return false;
+	}
+	const FString ProjectRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("DevUI"));
 
 	// ".tmptest" keeps it out of every staging glob and out of GetPackedExtensions, so a
 	// crashed run cannot leave a file the cooker would pick up.
@@ -607,17 +677,9 @@ bool FVaCuusPluginDocumentRootTest::RunTest(const FString& Parameters)
 	IFileManager::Get().Delete(*ProjectProbe);
 
 #if WITH_EDITOR
-	// THE PACKAGING HALF, and the reason it is in this test rather than left to a cook: the
-	// bundle is what serves a Shipping build, so "the plugin root is a document root" is only
-	// half true until the pack claims a file from it. EnumerateTree walks the same list.
-	//
-	// THIS PROBE BREAKS THE `.tmptest` CONVENTION ON PURPOSE, and it is the only one in the
-	// suite that does: GetPackedExtensions() is exactly what EnumerateTree matches on, so a
-	// probe the pack can see MUST carry a real extension. The cost is that a crashed run can
-	// leave a six-byte `.rml` in a consuming plugin's tree. Accepted because the next startup
-	// reports it (ScanShadowedDocuments walks that root) and because the alternative -- handing
-	// EnumerateTree a temporary root of our own -- would prove something about EnumerateTree,
-	// which is already tested, rather than about the PLUGIN root being in the list it is given.
+	// A real extension is required to exercise the Shipping pack's discovery path.
+	// The external check supplies disposable plugins, so even an interrupted run can
+	// clean up the fixture without leaving a packable document in a consumer's tree.
 	{
 		const FString PackProbeName = TEXT("vacuus_plugin_root_pack_probe.rml");
 		const FString PackProbe = PluginRoot / PackProbeName;
