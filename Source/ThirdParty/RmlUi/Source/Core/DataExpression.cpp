@@ -1067,7 +1067,8 @@ private:
 			size_t variable_index = size_t(data.Get<int>(-1));
 			if (variable_index < addresses.size())
 			{
-				if (!expression_interface.SetValue(addresses[variable_index], R))
+				VariableDefinition::ResetAssignmentDelivered(); // VaCuus patch #10: reset first, so a stale mark is never read.
+				if (!expression_interface.SetValue(addresses[variable_index], R) && !VariableDefinition::ConsumeAssignmentDelivered())
 					return Error("Could not assign to variable.");
 			}
 			else

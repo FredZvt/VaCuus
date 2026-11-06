@@ -12,6 +12,7 @@
 // FPlatformProperties::IniPlatformName (Core), both for the one-shot platform log below.
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProperties.h"
+#include "Null/NullPlatformApplicationMisc.h"
 
 // Types.h FIRST, and this is not include hygiene for its own sake: TextInputHandler.h has
 // ZERO #includes of its own yet uses RMLUICORE_API and NonCopyMoveable, so it only compiles
@@ -234,7 +235,7 @@ FIntRect GetElementViewRect(Rml::Element& Element)
 	if (Element.GetTransformState() != nullptr)
 	{
 		// GetAbsoluteOffset() is UNTRANSFORMED, so a transformed element has to go the
-		// expensive way and have its corners projected (ElementUtilities.cpp:235-275).
+		// expensive way and have its corners projected (ElementUtilities.cpp:240-327).
 		Rml::Rectanglef Bounds;
 		if (!Rml::ElementUtilities::GetBoundingBox(Bounds, &Element, Rml::BoxArea::Border))
 		{
@@ -1044,7 +1045,20 @@ void FVaCuusImeHandler::UpdateSurface(const FVaCuusImeSurface& InSurface)
 	if (!bLoggedPlatformSupport)
 	{
 		bLoggedPlatformSupport = true;
-		if (InSurface.TextInputMethodSystem == nullptr)
+		if (InSurface.TextInputMethodSystem == nullptr && FNullPlatformApplicationMisc::IsUsingNullApplication())
+		{
+			// OFFSCREEN IS NOT A PLATFORM GAP (bead VaCuus-w87.10). -RenderOffScreen swaps the
+			// platform application for the null one (WindowsPlatformApplicationMisc.cpp:171-176,
+			// LinuxPlatformApplicationMisc.cpp:619-624), which has no IME by construction -- so
+			// the Warning below fired on every headless run, the documented visual recipe
+			// included, and on Windows named the one platform it then said DOES implement
+			// composition. Log level: true, and of no consequence for a run nobody types into.
+			UE_LOG(LogVaCuus, Log,
+				TEXT("IME: unavailable in this run -- the process renders offscreen (-RenderOffScreen), whose null platform ")
+				TEXT("application has no ITextInputMethodSystem. %hs composition is unaffected in a normal run."),
+				FPlatformProperties::IniPlatformName());
+		}
+		else if (InSurface.TextInputMethodSystem == nullptr)
 		{
 			// The same predicate Slate's own editable text branches on
 			// (SlateEditableTextLayout.cpp:879), so the line describes the route text will

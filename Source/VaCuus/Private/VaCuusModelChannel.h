@@ -59,7 +59,7 @@ struct FVaCuusModelUpdate
  * the destination's capacity, else the buffer is reused outright (ReallocForCopy,
  * Array.h:710-751 -- `NewMax > PrevMax` on both branches), and the container block grows the
  * same way under Resize, with the SHRINK caveat SyncCopy's comment carries
- * (VaCuusModelLayout.cpp:45-52: a large trim may move the block). So a same-shape republish
+ * (VaCuusModelLayout.cpp:51-58: a large trim may move the block). So a same-shape republish
  * is assignment-shaped, not allocation-shaped -- a claim spec 9 checks with a counting
  * allocator rather than takes from this comment.
  *
@@ -100,7 +100,7 @@ struct FVaCuusModelUpdate
  *                VALUE, until the UI says it got it.
  *  - AppliedGeneration -- the UI thread's echo, release/acquire, exactly the shape of the
  *                document loader's load-serial (VaCuusRmlDocumentHost.cpp:263 stores,
- *                VaCuusView.cpp:747 and :864 load). Unacked clears only when the echo is >= the
+ *                VaCuusView.cpp:761 and :864 load). Unacked clears only when the echo is >= the
  *                generation of the LAST publish, never an earlier one: a publish that
  *                superseded it may carry values the older applied generation never saw.
  *

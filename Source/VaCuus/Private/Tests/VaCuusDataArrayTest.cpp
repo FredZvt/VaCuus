@@ -9,6 +9,7 @@
 #include "VaCuusModelLayout.h"
 #include "VaCuusModelShadow.h"
 #include "VaCuusTestDocumentHost.h"
+#include "VaCuusTestLogCapture.h"
 #include "VaCuusUIThread.h"
 #include "VaCuusViewStatus.h"
 #include "VaCuusWriteRouter.h"
@@ -305,7 +306,7 @@ private:
 		}
 
 		// The data-for TEMPLATE keeps its attribute -- only the generated rows drop it
-		// (DataViewDefault.cpp:486-491) -- and rows are inserted BEFORE it (:523), so "every
+		// (DataViewDefault.cpp:491-496) -- and rows are inserted BEFORE it (:535), so "every
 		// child without data-for, in order" is exactly the rows, in row order.
 		const int NumChildren = Container->GetNumChildren();
 		for (int Index = 0; Index < NumChildren; ++Index)
@@ -346,7 +347,7 @@ private:
 
 /**
  * Every adapter behaviour in one document. The data-for over Numbers carries the default
- * `it`/`it_index` aliases (DataViewDefault.cpp:462-466); the two non-array data-for
+ * `it`/`it_index` aliases (DataViewDefault.cpp:467-471); the two non-array data-for
  * targets and the two probes that must MISS (an out-of-bounds index, a named non-`size`
  * child) each have a named diagnostic the test registers as expected.
  *
@@ -362,7 +363,7 @@ private:
  * (DataExpression.cpp:315-331, :333), and Assignment() errors at the '['
  * (DataExpression.cpp:386-417) -- brackets exist only in r-value expressions. So the click
  * controllers live on the data-for templates, are copied onto every generated row
- * (DataViewDefault.cpp:486-491) and instantiate per row (ElementUtilities.cpp:439-448
+ * (DataViewDefault.cpp:491-496) and instantiate per row (ElementUtilities.cpp:447-456
  * cancels them only on the template itself), and the alias resolves to the clicked row's
  * element at event time -- which is also the only spelling a real document would use.
  */
@@ -537,7 +538,7 @@ bool FVaCuusArrayBindingTest::RunTest(const FString& Parameters)
 	// VariableDefinition::Set with no VaCuus code in between -- through the row alias, the
 	// one spelling the assignment grammar admits (GDocumentMain's comment) -- and both RmlUi
 	// call sites skip their DirtyVariable when Set refuses (DataControllerDefault.cpp:57-59,
-	// DataExpression.cpp:1185-1197), so the DOM must not move either.
+	// DataExpression.cpp:1186-1198), so the DOM must not move either.
 	//
 	// SINCE M4 TASK 9 THIS PHASE IS ALSO THE ROUTER-ABSENT PROOF: the write router IS
 	// registered in this binary (FVaCuusUIThread::Init does it), but this fixture binds
@@ -575,6 +576,11 @@ bool FVaCuusArrayBindingTest::RunTest(const FString& Parameters)
 		Host.bKillerElementIntact = Host.Model().Killfeed[0].Killer.Equals(KillerBefore, ESearchCase::CaseSensitive);
 		Host.bNumberElementIntact = Host.Model().Numbers[0] == NumberBefore;
 	};
+
+	// THE OTHER HALF OF VaCuus-w87.1's GUARD. A routed write no longer reports "Could not assign
+	// to variable" (VaCuus.Js.Router.WriteRoutesAndReverts asserts zero); a REFUSED one still
+	// must -- it is a genuine failure, and the delivered-assignment mark must not swallow it.
+	FVaCuusTestLogCapture LogCapture;
 
 	const uint32 ViewId = UIThread->AllocateViewId();
 	UIThread->EnqueueAddView(ViewId, MoveTemp(OwnedHost), FIntPoint(400, 300), Status);
@@ -618,7 +624,7 @@ bool FVaCuusArrayBindingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("{{Numbers.size}} renders the element count"), Initial.Count, FString(TEXT("2")));
 
 	// data-for with the default aliases: {{it}} is the element, {{it_index}} the frozen
-	// creation index (DataViewDefault.cpp:513-521).
+	// creation index (DataViewDefault.cpp:525-533).
 	if (TestEqual(TEXT("one row per element"), Initial.Rows.Num(), 2))
 	{
 		TestEqual(TEXT("row 0 renders value and index"), Initial.Rows[0], FString(TEXT("1:0")));
@@ -694,6 +700,8 @@ bool FVaCuusArrayBindingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and the refused scalar-element write too"), Host->bNumberElementIntact);
 	TestEqual(TEXT("the struct row's DOM did not move"), AfterClicks.K0, FString(TEXT("K0")));
 	TestTrue(TEXT("nor did the scalar rows"), AfterClicks.Rows == Grown.Rows);
+	TestEqual(TEXT("each refused Assign is still reported as a failed assignment"),
+		LogCapture.Count(TEXT("Could not assign to variable")), 2);
 
 	UIThread->EnqueueRemoveView(ViewId);
 	RunFrames(*UIThread, 1);

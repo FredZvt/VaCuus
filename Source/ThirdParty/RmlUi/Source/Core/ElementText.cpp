@@ -97,6 +97,8 @@ void LogMissingFontFace(Element* element)
 	}
 }
 
+RMLUI_RTTI_Define(ElementText)
+
 ElementText::ElementText(const String& tag) :
 	Element(tag), colour(255, 255, 255), opacity(1), font_handle_version(0), geometry_dirty(true), dirty_layout_on_change(true),
 	generated_decoration(Style::TextDecoration::None), decoration_property(Style::TextDecoration::None), font_effects_dirty(true),
@@ -251,6 +253,7 @@ bool ElementText::GenerateLine(String& line, int& line_length, float& line_width
 	// endline is found (and we're processing them), then the line is ended. kthxbai!
 	const char* token_begin = text.c_str() + line_begin;
 	const char* string_end = text.c_str() + text.size();
+	float line_pen = 0.f; // VaCuus patch #15 follow-up (VENDORED_TAG.txt): the unrounded pen at the end of `line`.
 	while (token_begin != string_end)
 	{
 		String token;
@@ -263,7 +266,12 @@ bool ElementText::GenerateLine(String& line, int& line_length, float& line_width
 		// Generate the next token and determine its pixel-length.
 		bool break_line = BuildToken(token, next_token_begin, string_end, line.empty() && trim_whitespace_prefix, collapse_white_space,
 			break_at_endline, text_transform_property, decode_escape_characters);
-		int token_width = font_engine_interface->GetStringWidth(font_face_handle, token, text_shaping_context, previous_codepoint);
+		// VaCuus patch #15 (VENDORED_TAG.txt): a token costs what it adds to the line, so the line is rounded up once and not
+		// once per token. The follow-up continues the line's unrounded pen instead of re-measuring `line + token`, which cost
+		// the line's length again for every token.
+		float token_pen = line_pen;
+		int token_width =
+			font_engine_interface->GetStringWidthFrom(font_face_handle, token, text_shaping_context, previous_codepoint, token_pen) - int(line_width);
 
 		// If we're breaking to fit a line box, check if the token can fit on the line before we add it.
 		if (break_at_line)
@@ -301,7 +309,11 @@ bool ElementText::GenerateLine(String& line, int& line_length, float& line_width
 						next_token_begin = token_begin;
 						BuildToken(token, next_token_begin, partial_string_end, line.empty() && trim_whitespace_prefix, collapse_white_space,
 							break_at_endline, text_transform_property, decode_escape_characters);
-						token_width = font_engine_interface->GetStringWidth(font_face_handle, token, text_shaping_context, previous_codepoint);
+						// VaCuus patch #15 (VENDORED_TAG.txt): measured on the line, as above.
+						token_pen = line_pen;
+						token_width = font_engine_interface->GetStringWidthFrom(font_face_handle, token, text_shaping_context, previous_codepoint,
+										  token_pen) -
+							int(line_width);
 
 						if (force_loop_break_at_end || token_width <= max_token_width)
 							break;
@@ -321,6 +333,7 @@ bool ElementText::GenerateLine(String& line, int& line_length, float& line_width
 		line += token;
 		line_length += (int)(next_token_begin - token_begin);
 		line_width += token_width;
+		line_pen = token_pen; // VaCuus patch #15 follow-up (VENDORED_TAG.txt)
 
 		// Break out of the loop if an endline was forced.
 		if (break_line && (allow_empty || !line.empty()))

@@ -71,9 +71,26 @@ neither of which the engine tells you about:
 
 1. Install: a Fab install already put the plugin into the engine — there is nothing to
    copy. A source install goes into `<Project>/Plugins/VaCuus`.
-2. Enable it (Editor → Plugins, or `"Plugins": [{"Name": "VaCuus", "Enabled": true}]`
-   in the `.uproject`). Runtime modules: `VaCuus`, `VaCuusRender`, `VaCuusJs`,
-   `VaCuusRml`; `VaCuusEditor` is editor-only (live reload, bundle factory).
+2. Enable it — Editor → Plugins is simplest. By hand, the `.uproject` entry needs the two
+   fields the editor would write, or every editor start shows "Project file is out of date"
+   (the editor compares both against the plugin descriptor,
+   `GameProjectUtils.cpp:946-976`):
+
+   ```json
+   "Plugins": [
+     {
+       "Name": "VaCuus",
+       "Enabled": true,
+       "MarketplaceURL": "https://fab.com/s/6571fd1716eb",
+       "SupportedTargetPlatforms": ["Win64", "Mac", "Linux", "Android", "IOS"]
+     }
+   ]
+   ```
+
+   Copy both values from `VaCuus.uplugin` rather than from this page — they follow the
+   release. Clicking the toast's **Update** once writes the same thing. Runtime modules: `VaCuus`,
+   `VaCuusRender`, `VaCuusJs`, `VaCuusRml`; `VaCuusEditor` is editor-only (live reload,
+   bundle factory).
 3. Verify: the console knows `vacuus.M2Demo`. Run it — an interactive demo document
    appears. `Automation RunTests VaCuus` runs the full shipped suite (test source
    ships on purpose, with its fixtures).
@@ -100,8 +117,14 @@ with RmlUi's own inertia and cancels the click as a scroll should, and focusing 
 field summons the platform's on-screen keyboard, with typed text landing in the
 document and a tap outside dismissing it. World panels take taps too. The finer edges
 still recorded in the tracker rather than hidden: the click-vs-scroll threshold is not
-yet DPI-scaled on very dense screens, multi-finger gestures share one capture, and an
-iPad with a hardware keyboard types without IME composition.
+yet DPI-scaled on very dense screens, and an iPad with a hardware keyboard types
+without IME composition.
+
+HUD buttons support independent fingers, including simultaneous `drag: clone` copies.
+A connected mouse has its own gesture state, so a mouse click does not consume a held
+finger's click or drag. Touch events carry `event.params.touch_id`, including the first
+finger; physical mouse events omit it. Set the UMG widget's `bTakesKeyboardFocus` to
+`false` before it is built for a HUD that should keep keyboard focus in the game.
 
 Unreal's own refusal for an unsupported platform is quiet, so here is what you will
 actually see:
@@ -152,6 +175,53 @@ Either way you get a `UVaCuusView*` from `GetView()`, and that is what you feed 
 `LoadDocument`, `Close`, the data-model bindings, the input and status surface. **Bind data
 models BEFORE LoadDocument** (gotchas.md #9).
 
+### Binding and input rules — read these before your first model
+
+Every rule below once cost a real integration an hour or more, because breaking it renders
+something plausible rather than failing. Each now logs, but knowing the rule is cheaper.
+
+1. **A model field binds only if it is exposed** — `BlueprintReadOnly`/`BlueprintReadWrite`,
+   or `VisibleAnywhere`/`EditAnywhere` (`CPF_BlueprintVisible | CPF_Edit`,
+   `Source/VaCuus/Private/VaCuusModelLayout.cpp:747`). A plain `UPROPERTY()` is skipped
+   quietly, because most structs have members a UI should not see; when **no** field
+   survives, the model's Warning names every member it skipped. One knock-on: UE's Python
+   binding strips the `b` from bool names, so a now-exposed `bCountdown` and `Countdown`
+   collide there (PythonScriptPlugin `PyGenUtil.cpp:1957-1961`) — rename one.
+2. **No container inside an array element.** In `TArray<FCard>`, a `TArray` (or `TMap`,
+   `TSet`) member of `FCard` is not bound: change tracking is one bit per top-level array,
+   so an inner list's edits would be invisible. The rest of the row binds, and one Warning
+   names the array and the member. To show per-row lists, flatten them into one top-level
+   array whose entries carry their row's index, and filter with `data-if` inside the row
+   loop. An `FText` anywhere in a row still refuses the whole array — project it to
+   `FString` on the game side.
+3. **Reserved names, and aliases.** `t` is the live translation variable in every model
+   (localization.md §3); a field named `t` is refused. A `data-for` alias is unreachable when
+   it equals `t` **or any top-level field of the same model** — RmlUi resolves top-level
+   variables first — and is logged as an Error naming the element and the document. Give
+   aliases names no field has: `card`, `trait`, `row`.
+4. **A click writes a request; the game decides.** `data-event-click="Pick = 2"` does not
+   change the UI's copy of the model. The write is delivered to the game thread as
+   `UVaCuusView::OnModelWrite` (model, path, value) and the control snaps back until the
+   game pushes a new value (`Source/VaCuus/Public/VaCuusView.h:128-135`). **A write equal to
+   the field's current value is swallowed** (the echo rule,
+   `Source/VaCuus/Private/VaCuusWriteRouter.h:65-79`), so a request field must return to an
+   idle value — 0, -1, "" — once the game has acted, or the second press of the same button
+   never arrives. `Content/DevUI/m4_demo.rml` writes `Ammo = Ammo - 1` for this reason.
+5. **What takes a press away from the game.** A press over an element goes to the UI, not
+   the game, when the element is a `button`/`input`/`select`/`textarea`/`a`, has
+   `tab-index: auto`, carries the `vacuus-interactive` attribute, or has a press handler in
+   its markup — `data-event-click` (or `dblclick`, `mousedown`, `mouseup`, `mousescroll`,
+   `drag*`) or an inline `onclick`-style handler. Hover handlers do not count, and
+   `vacuus-passthrough` gives a whole subtree's presses back to the game. A div given a
+   listener from script with `addEventListener` is invisible to all of this: mark it
+   `vacuus-interactive`. A passive overlay — a comparison card over an FPS view — should
+   carry none of these, or it eats the shot.
+6. **`dp` follows the DPI curve; `px` does not.** A screen view is laid out in physical
+   pixels, and `dp` is scaled by Slate's geometry scale — your project's DPI curve, as UMG
+   uses — so dp-authored UI keeps its size from 1080p to 4K, while `px` stays one physical
+   pixel. `vacuus.DpFollowsDpiScale 0` restores dp == px (the behaviour of 1.0.3 and
+   earlier). World panels keep dp == px: their `DrawSize` is their pixel size.
+
 ### From C++
 
 Add both runtime modules to your module's `.Build.cs` — **and `UMG`** —
@@ -166,7 +236,8 @@ and UBT does not put it there for you: a public dependency propagates **include 
 transitively, not libraries — the recursive link gather is gated on
 `bIsModuleBinaryAStaticLibrary`, and in a modular editor build every module is its own shared
 library (`UnrealBuildTool/Configuration/UEBuildModule.cs:950-958`). So the code compiles and
-then dies at link with `ld.lld: error: undefined symbol: UWidget::TakeWidget()`. Naming UMG
+then dies at link: `ld.lld: error: undefined symbol: UWidget::TakeWidget()` with clang, an
+`LNK2019: unresolved external symbol` naming `UWidget::TakeWidget` with MSVC. Naming UMG
 yourself is the fix.
 
 — then `#include "VaCuusUMGWidget.h"` (or `"VaCuusWorldComponent.h"`) and `"VaCuusView.h"`.
@@ -280,6 +351,17 @@ path is `UVaCuusBundle`: one asset that packs your whole DevUI tree into a singl
 payload at cook time and serves it through the same VFS paths, so nothing about your
 documents changes.
 
+**What goes in.** Every file of a packed kind under your project's `Content/DevUI` and
+under every other enabled plugin's `Content/DevUI`, minus `Tests/` folders. From
+**VaCuus's own** `Content/DevUI`, only what your documents can depend on: its
+stylesheets (`M5Hud/vacuus-base.rcss` among them) and its fonts (the default face, which a
+Shipping build loads from the bundle and nowhere else). The plugin's demo documents,
+scripts and images stay out — before this, a ten-file UI cooked into a 41-file bundle. The
+cook log line counts what was left out (`… N plugin demo file(s) excluded`). A project that
+does want the demos in its package — the plugin's own test hosts boot them in Shipping —
+sets `bPackPluginDemos=True` under `[VaCuus]` (step 2 below). A project document that has
+the same path as a plugin demo now ships, where it used to be shadowed by the demo.
+
 **Memory-mapped or resident is the engine's call, not a platform law we wrote.** The
 loader maps the payload where `FPlatformProperties::SupportsMemoryMappedFiles()` is
 true and hands us one resident buffer where it is false. Of the platforms this plugin
@@ -307,6 +389,7 @@ LogVaCuus: Mounted bundle '<name>': 24 entries, 461881 bytes, resident buffer (.
 
    [VaCuus]
    BundleAssetPath=/Game/Bundles/MyUIBundle.MyUIBundle
+   ; bPackPluginDemos=True   ; only to ship VaCuus's own demo documents as well
    ```
 
    **The cook-inclusion rule, and why it is loud:** `BundleAssetPath` is a config
@@ -351,7 +434,7 @@ loose-vs-bundle A/B runs. `vacuus.DumpBundle` prints any mounted bundle's index,
 provenance and content hash.
 
 **Your own DevUI files and the loose-file leg — one config line, and only for
-non-Shipping packages.** The bundle packer walks *both* document roots
+non-Shipping packages.** The bundle packer walks every document root
 (`VaCuusContentPaths::GetDocumentRoots()`), so everything under
 `<Project>/Content/DevUI` is inside the bundle and Shipping needs nothing from you. The
 loose copies are a different story: the plugin's staging globs are anchored at
@@ -385,12 +468,15 @@ M must be 0, and the plugin's own packaged acceptance gates assert exactly that.
 without a person sitting at the editor. Here is the whole pipeline, and then the four
 things about it that will each cost you an afternoon the first time.
 
-**The suite** — no RHI needed, so it runs on a build agent:
+**The suite** — no RHI needed, so it runs on a build agent, and it exits by itself with a
+status (0 when every test passed, non-zero otherwise):
 
 ```bash
 <Engine>/Binaries/<Platform>/UnrealEditor-Cmd <Project>.uproject \
-  -ExecCmds="Automation RunTests VaCuus, Quit" -unattended -nullrhi -nosplash
+  -unattended -nullrhi -nosplash -ExecCmds="Automation RunTests VaCuus; Quit"
 ```
+
+The `;` there is not a slip — see 1 and 4 below.
 
 **A visual run** — a real frame, offscreen, at a resolution you chose:
 
@@ -402,13 +488,28 @@ things about it that will each cost you an afternoon the first time.
 
 Screenshots land in `Saved/Screenshots/<Platform>/`.
 
+**A click, by element id** — append to the same command list, e.g.
+`-ExecCmds="<your command>, vacuus.Click ready-btn 1.0,"`. `vacuus.Click <element-id>
+[delaySeconds] [viewId]` asks the UI thread where the element is after its next layout,
+presses and releases at its centre through Slate's real routing, and logs who took it:
+`…the press was taken by THE UI` or `…by THE GAME`. It aims at the element, not at
+coordinates, so it survives `data-if` lines that move buttons and window resizes. A
+missing id, or an element that is hidden or has no area, is an Error that says which.
+
 **1. `-ExecCmds` splits on COMMAS, not semicolons.** `ParseExecCommands.cpp:27` is the
-split, and single-quoted commas are the documented escape (`:11-14`). A recipe written
-with `;` is not rejected — it is parsed as ONE command, which does not exist, and no
-"not recognized" line appears anywhere. **The value also swallows every argument after
-it**: `ParseExecCmdsFromCommandLine` passes `bShouldStopOnSeparator=false`
+split, and single-quoted commas are the documented escape (`:11-14`). A recipe of ordinary
+console commands written with `;` is not rejected — it is parsed as ONE command, which does
+not exist, and no "not recognized" line appears anywhere. **The value also swallows every
+argument after it**: `ParseExecCmdsFromCommandLine` passes `bShouldStopOnSeparator=false`
 (`ParseExecCommands.cpp:63`), so anything to its right becomes part of the last command.
-Put `-ExecCmds` last and **end its value with a comma**, as both recipes above do.
+Put `-ExecCmds` last and **end a console-command list with a comma**, as the visual recipe
+does.
+
+**`Automation` is the exception, and the suite recipe relies on it.** The `Automation`
+command splits ITS OWN argument on `;` (`AutomationCommandline.cpp:582`), so
+`Automation RunTests VaCuus; Quit` is one `-ExecCmds` command whose two halves the
+automation handler runs in order — and that `Quit` is the handler's own subcommand
+(`:726`), not the console one. See 4.
 
 **2. `-RenderOffscreen` alone does not give you the resolution you asked for.**
 `-resx`/`-resy` are clamped to the monitor's usable size unless `-ForceRes` is present
@@ -419,11 +520,17 @@ small default and every pixel assertion you make is about the wrong frame.
 processes (the trace server in particular) fork and interleave, and the tail of stdout is
 routinely clobbered. The log file is not.
 
-**4. Expect to kill the process yourself.** `Quit` in an `-ExecCmds` list is dispatched at
-frame 0 and deferred, and after an automation session it frequently never fires; the run
-is finished when `Sending StopTestSession` appears in the log. **Kill it by PID.** Do not
-`pkill -f` a pattern taken from the command line — that pattern also matches the shell
-that launched it, and on a build agent it will match the job.
+**4. Quit through `Automation`, not beside it.** A console `Quit` as its own `-ExecCmds`
+entry (`"Automation RunTests VaCuus, Quit"`) is dispatched at frame 0, before the tests
+have even started, and is deferred; after an automation session it typically never fires,
+so the process sits idle until something kills it. `Automation`'s own `Quit` is queued
+behind the run and exits when the run completes, setting the exit code from the results
+(`AutomationCommandline.cpp:490-504`, which also prints `**** TEST COMPLETE. EXIT CODE: N
+****`). Measured on the plugin's own suite, same test, same machine: `"…; Quit"` exited by
+itself in 23 s with exit code 0; `"…, Quit"` finished the test in 5 s and then idled until
+a watchdog killed it at 150 s. If you ever do have to kill a stuck editor, kill it **by PID**.
+Do not `pkill -f` a pattern taken from the command line — that pattern also matches the
+shell that launched it, and on a build agent it will match the job.
 
 None of this is VaCuus-specific; it is how the engine behaves. It is here because the
 plugin's own acceptance runs are driven exactly this way, and because a buyer who cannot
@@ -436,3 +543,6 @@ reproduce the pipeline cannot check any claim in `perf-guide.md` against their o
   RmlUi this plugin ships.
 - `perf-guide.md` — the budgets, the measured numbers, and the design idioms
   (read the passport's "The re-baseline" before planning a 1,700-node always-animated HUD).
+
+SVG images and Lottie animations are described in [vector assets](vector-assets.md),
+including relative resource paths, cooked bundles and CPU rasterization cost.

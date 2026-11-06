@@ -1,13 +1,13 @@
 # Supported RCSS matrix -- generated, keyed to the vendored RmlUi
 
-**Vendored RmlUi SHA:** `0ae381e00d7426762bb5ed897973366358b16642` (`Source/ThirdParty/RmlUi/VENDORED_SHA.txt`)
+**Vendored RmlUi SHA:** `ba95ffe8bfb6370efb2cdcca927eaad4710c5413` (`Source/ThirdParty/RmlUi/VENDORED_SHA.txt`)
 
 **GENERATED FILE -- do not edit the tables by hand.** Regenerate after any RmlUi
 bump with `python3 Tools/gen_rcss_matrix.py` (run from the plugin root). The
 property and shorthand tables are parsed mechanically from
 `StyleSheetSpecification::RegisterDefaultProperties` (StyleSheetSpecification.cpp:248-438
 in this vendored tree); the decorator/filter/font-effect names from the
-`Factory::RegisterDefault*Instancers` registrations in Factory.cpp. The Notes
+`Factory::RegisterDefault*Instancers` registrations in Factory.cpp and the enabled SVG plugin. The Notes
 column is hand-maintained inside the generator script (plugin-side truth with
 source cites) and survives regeneration.
 
@@ -82,7 +82,7 @@ A property with multiple parsers accepts any of them, tried in order.
 | `row-gap` | `0px` | no | yes | length_percent |  |
 | `column-gap` | `0px` | no | yes | length_percent |  |
 | `cursor` | `` (empty) | yes | no | string |  |
-| `drag` | `none` | no | no | keyword: none, drag, drag-drop, block, clone | Only `drag-drop` and `clone` send dragover/dragout/dragdrop/dragmove -- plain `drag` sends dragstart/drag/dragend and nothing else (Context.cpp:692 sets drag_verbose for exactly those two), and `block` stops an ancestor from becoming the drag source. `clone` ships a ghost under the cursor styleable via `:drag` -- the ONE drag pseudo-class, set on the clone only (Context.cpp:1504); sources and targets get no pseudo-class at all. Shipped reference: vacuus.DragDemo + gotchas.md #24; proven by VaCuus.Js.DragDrop. |
+| `drag` | `none` | no | no | keyword: none, drag, drag-drop, block, clone | Only `drag-drop` and `clone` send dragover/dragout/dragdrop/dragmove -- plain `drag` sends dragstart/drag/dragend and nothing else (Context.cpp:767 sets drag_verbose for exactly those two), and `block` stops an ancestor from becoming the drag source. `clone` ships a ghost under the cursor styleable via `:drag` -- the ONE drag pseudo-class, set on the clone only (Context.cpp:1978); sources and targets get no pseudo-class at all. Shipped reference: vacuus.DragDemo + gotchas.md #24; proven by VaCuus.Js.DragDrop. |
 | `tab-index` | `none` | no | no | keyword: none, auto |  |
 | `focus` | `auto` | yes | no | keyword: none, auto |  |
 | `nav-up` | `none` | no | no | keyword: none, auto, horizontal, vertical, tree-order; string | The nav-* family is NOT inherited: spatial-nav rules must sit on the focusable element itself, and targets use `#id` syntax (rmlui-input.md:190-207, :450). |
@@ -145,7 +145,7 @@ A property with multiple parsers accepts any of them, tried in order.
 | `flex` | flex-grow, flex-shrink, flex-basis | Flex |  |
 | `flex-flow` | flex-direction, flex-wrap | FallThrough |  |
 
-## Decorators (16 registered names)
+## Decorators (17 registered names)
 
 Registered in Factory.cpp (line numbers in this vendored tree). All render
 through the record/replay path. `shader(<name-or-key>)` resolves builtin
@@ -190,24 +190,25 @@ register the `"length"` parser and nothing else
 and the corner stays square. Spell a circle as half its own side
 (`width: 64px; border-radius: 32px`).
 
-| Decorator | Factory.cpp line |
+| Decorator | Registration |
 |---|---|
-| `text` | :196 |
-| `tiled-horizontal` | :197 |
-| `tiled-vertical` | :198 |
-| `tiled-box` | :199 |
-| `image` | :200 |
-| `ninepatch` | :201 |
-| `shader` | :202 |
-| `gradient` | :204 |
-| `horizontal-gradient` | :205 |
-| `vertical-gradient` | :206 |
-| `linear-gradient` | :208 |
-| `repeating-linear-gradient` | :209 |
-| `radial-gradient` | :210 |
-| `repeating-radial-gradient` | :211 |
-| `conic-gradient` | :212 |
-| `repeating-conic-gradient` | :213 |
+| `text` | Factory.cpp:196 |
+| `tiled-horizontal` | Factory.cpp:197 |
+| `tiled-vertical` | Factory.cpp:198 |
+| `tiled-box` | Factory.cpp:199 |
+| `image` | Factory.cpp:200 |
+| `ninepatch` | Factory.cpp:201 |
+| `shader` | Factory.cpp:202 |
+| `gradient` | Factory.cpp:204 |
+| `horizontal-gradient` | Factory.cpp:205 |
+| `vertical-gradient` | Factory.cpp:206 |
+| `linear-gradient` | Factory.cpp:208 |
+| `repeating-linear-gradient` | Factory.cpp:209 |
+| `radial-gradient` | Factory.cpp:210 |
+| `repeating-radial-gradient` | Factory.cpp:211 |
+| `conic-gradient` | Factory.cpp:212 |
+| `repeating-conic-gradient` | Factory.cpp:213 |
+| `svg` | SVGPlugin.cpp:26 |
 
 ## Filters (10 registered names) -- blur-only in v1
 

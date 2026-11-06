@@ -33,12 +33,19 @@ namespace VaCuusInteractiveSnapshot
  *
  * Plain attributes rather than `data-*` names on purpose:
  * ElementUtilities::ApplyDataViewsControllers parses any `data-<type>-<modifier>`
- * attribute (ElementUtilities.cpp:407-424) and would quietly hand
+ * attribute (ElementUtilities.cpp:415-432) and would quietly hand
  * type_name="vacuus" to Factory::InstanceDataView. Harmless, but it puts our
  * markers inside someone else's grammar.
  */
 static constexpr char GPassthroughAttribute[] = "vacuus-passthrough";
 static constexpr char GInteractiveAttribute[] = "vacuus-interactive";
+
+/**
+ * Not a coverage marker at all: it asks for the element's laid-out box to be published
+ * (FVaCuusInteractiveSnapshot::MeasuredRects). Read in the same pass as the two above and
+ * matched the same case-insensitive way, so it costs no extra walk over the attributes.
+ */
+static constexpr char GMeasureAttribute[] = "vacuus-measure";
 
 /** ASCII case-insensitive compare against a lowercase literal; length-gated first. */
 template <SIZE_T Length>
@@ -68,7 +75,73 @@ struct FMarkerAttributes
 {
 	bool bPassthrough = false;
 	bool bInteractive = false;
+
+	/** A press handler written in the markup: `data-event-<press>` or inline `on<press>`. */
+	bool bPressHandler = false;
+
+	/** Points into the element's own attribute map; valid only until the element is touched again. */
+	const Rml::Variant* Measure = nullptr;
 };
+
+/**
+ * Is this attribute a handler for an event a PRESS produces (bead VaCuus-w87.2)?
+ *
+ * The header's reason for a heuristic -- RmlUi cannot say whether an element has a listener --
+ * does not reach these two spellings, because both are plain attributes and stay on the
+ * element: ApplyDataViewsControllers reads `data-<type>-<modifier>` without removing it
+ * (ElementUtilities.cpp:415-463), and Element::OnAttributeChange instances an `on<event>`
+ * listener from the attribute it leaves in place (Element.cpp:1724-1750). The field report's
+ * buttons were exactly this -- divs with data-event-click -- and every press went to the game.
+ *
+ * PRESS EVENTS ONLY. A hover handler (mouseover, mouseout, mousemove) answers to a cursor that
+ * is merely passing, and an overlay that lights up under it must not swallow the click aimed
+ * at the game behind it. Keyboard events need focus, not pointer coverage, so they are out too.
+ *
+ * Case-SENSITIVE, unlike the two markers: RmlUi itself matches both prefixes byte for byte
+ * (ElementUtilities.cpp:424, Element.cpp:1724), so a `Data-Event-Click` does nothing in RmlUi
+ * and must not claim the press here either.
+ */
+static bool IsPressHandlerAttribute(const Rml::String& Name)
+{
+	static constexpr char DataEventPrefix[] = "data-event-";
+	static constexpr char InlinePrefix[] = "on";
+	static constexpr char CaptureSuffix[] = "capture";
+
+	size_t EventOffset = 0;
+	size_t EventLength = 0;
+	if (Name.compare(0, sizeof(DataEventPrefix) - 1, DataEventPrefix) == 0)
+	{
+		EventOffset = sizeof(DataEventPrefix) - 1;
+		EventLength = Name.size() - EventOffset;
+	}
+	else if (Name.compare(0, sizeof(InlinePrefix) - 1, InlinePrefix) == 0)
+	{
+		// `on<event>capture` registers the same listener in the capture phase
+		// (Element.cpp:1727-1731); the event is what is left once the suffix is off.
+		EventOffset = sizeof(InlinePrefix) - 1;
+		EventLength = Name.size() - EventOffset;
+		const size_t SuffixLength = sizeof(CaptureSuffix) - 1;
+		if (EventLength > SuffixLength && Name.compare(Name.size() - SuffixLength, SuffixLength, CaptureSuffix) == 0)
+		{
+			EventLength -= SuffixLength;
+		}
+	}
+	else
+	{
+		return false;
+	}
+
+	static const char* const PressEvents[] = {
+		"click", "dblclick", "mousedown", "mouseup", "mousescroll", "dragstart", "drag", "dragend"};
+	for (const char* const Event : PressEvents)
+	{
+		if (Name.compare(EventOffset, EventLength, Event) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
 
 static FMarkerAttributes ReadMarkerAttributes(const Rml::Element& Element)
 {
@@ -87,6 +160,14 @@ static FMarkerAttributes ReadMarkerAttributes(const Rml::Element& Element)
 		else if (EqualsIgnoreCaseAscii(Attribute.first, GInteractiveAttribute))
 		{
 			Markers.bInteractive = true;
+		}
+		else if (EqualsIgnoreCaseAscii(Attribute.first, GMeasureAttribute))
+		{
+			Markers.Measure = &Attribute.second;
+		}
+		else if (IsPressHandlerAttribute(Attribute.first))
+		{
+			Markers.bPressHandler = true;
 		}
 	}
 
@@ -366,6 +447,40 @@ static FIntRect ToPixelRect(Rml::Vector2f Position, Rml::Vector2f Size)
 }
 
 /**
+ * Inline layout stores subsequent lines as additional boxes (InlineBox.cpp:117-126),
+ * while GetBox() returns only the first (Element.cpp:466-484). Measure their union,
+ * projecting each fragment separately so rotated gaps do not enlarge the result.
+ */
+static bool GetMeasuredRect(Rml::Element& Element, const FIntRect& MainRect, FIntRect& OutRect)
+{
+	OutRect = MainRect;
+	const bool bTransformed = Element.GetTransformState() != nullptr;
+	const Rml::Vector2f Position = Element.GetAbsoluteOffset(Rml::BoxArea::Border);
+	const int32 NumBoxes = Element.GetNumBoxes();
+	for (int32 Index = 1; Index < NumBoxes; ++Index)
+	{
+		FIntRect Fragment;
+		if (bTransformed)
+		{
+			Rml::Rectanglef Bounds;
+			if (!Rml::ElementUtilities::GetBoundingBox(Bounds, &Element, Rml::BoxArea::Border, Index))
+			{
+				return false;
+			}
+			Fragment = ToPixelRect(Bounds.Position(), Bounds.Size());
+		}
+		else
+		{
+			Rml::Vector2f Offset;
+			const Rml::Box& Box = Element.GetBox(Index, Offset);
+			Fragment = ToPixelRect(Position + Offset, Box.GetSize(Rml::BoxArea::Border));
+		}
+		OutRect.Union(Fragment);
+	}
+	return true;
+}
+
+/**
  * One depth-first walk over a context's element tree.
  *
  * The clip rectangle is carried DOWN as a parameter rather than looked up per
@@ -426,7 +541,7 @@ void FSnapshotWalk::Visit(Rml::Element* Element, const FIntRect& Clip, bool bFoc
 	// it reports where the element would have been, and RmlUi's own hit test
 	// compensates by inverse-projecting the query point instead. So a transformed
 	// element has to go the expensive way -- GetBoundingBox projects the four corners
-	// (ElementUtilities.cpp:235-275) -- and the transform state is the gate, because
+	// (ElementUtilities.cpp:240-327) -- and the transform state is the gate, because
 	// the cheap path is a cached field read and this is not.
 	FIntRect Rect;
 	if (Element->GetTransformState() != nullptr)
@@ -448,18 +563,35 @@ void FSnapshotWalk::Visit(Rml::Element* Element, const FIntRect& Clip, bool bFoc
 			Element->GetAbsoluteOffset(Rml::BoxArea::Border), Element->GetBox().GetSize(Rml::BoxArea::Border));
 	}
 
+	// BEFORE the clip, on purpose: a measured box is asked for its size, and a box half
+	// off-screen is still its full size (see FVaCuusInteractiveSnapshot::MeasuredRects).
+	// The attribute is a STRING both when the parser stored it (BaseXMLParser.cpp:341)
+	// and when a `data-attr` binding set it (DataViewDefault.cpp:76-81). Variant::GetInto
+	// converts it through TypeConverter (Variant.inl:48), which is `sscanf("%d")`
+	// (TypeConverter.inl:181-184): a leading integer is enough ("7px" reads 7), and a
+	// string with none fails the conversion and is simply not published.
+	int MeasureKey = 0;
+	if (Markers.Measure != nullptr && Markers.Measure->GetInto(MeasureKey))
+	{
+		FIntRect MeasuredRect;
+		if (GetMeasuredRect(*Element, Rect, MeasuredRect))
+		{
+			Out.MeasuredRects.Add(FVaCuusMeasuredRect{MeasureKey, MeasuredRect});
+		}
+	}
+
 	Rect.Clip(Clip);
 
 	const Rml::ComputedValues& Computed = Element->GetComputedValues();
 
 	// pointer-events is checked PER ELEMENT and never used to prune the subtree.
 	// It is an inherited property (StyleSheetSpecification.cpp:386) but RmlUi
-	// evaluates it only after descending into children (Context.cpp:1442, after the
+	// evaluates it only after descending into children (Context.cpp:1927, after the
 	// stacking-context loop), so a `pointer-events: auto` descendant of a `none`
 	// parent IS hit -- and must therefore still be reported here.
 	const bool bInteractive = Computed.pointer_events() != Rml::Style::PointerEvents::None &&
 		(Computed.tab_index() == Rml::Style::TabIndex::Auto || IsKnownInteractiveTag(Element->GetTagName()) ||
-			Markers.bInteractive);
+			Markers.bInteractive || Markers.bPressHandler);
 
 	// `focus: none` blocks this element and everything under it (see Visit's comment).
 	// Evaluated before the flag below so an element that blocks focus is not itself
@@ -564,7 +696,7 @@ FVaCuusSnapshotBuildStats BuildVaCuusInteractiveSnapshot(
 	// already knows. What it cannot know is whether keys will land on an element --
 	// Context::ProcessKeyDown dispatches to `focus`, or to the context root if there
 	// is none, and the root is not a document and has no default action, so nothing
-	// happens (Context.cpp:533-537).
+	// happens (Context.cpp:561-565).
 	Rml::Element* const Focus = Context.GetFocusElement();
 	bool bFocusIsRealElement = Focus != nullptr && Focus != Context.GetRootElement();
 
@@ -577,7 +709,7 @@ FVaCuusSnapshotBuildStats BuildVaCuusInteractiveSnapshot(
 	Rml::ElementDocument* FocusedDocument = nullptr;
 
 	// Front to back: a higher document index is closer to the front
-	// (PullDocumentToFront appends to the root's children, Context.cpp:468-481). The
+	// (PullDocumentToFront appends to the root's children, Context.cpp:496-509). The
 	// order does not change the union, but it costs nothing to produce the rects in
 	// the order RmlUi would have hit-tested them.
 	const int32 NumDocuments = Context.GetNumDocuments();
@@ -613,7 +745,7 @@ FVaCuusSnapshotBuildStats BuildVaCuusInteractiveSnapshot(
 	// why neither is derivable from the rects.
 	//
 	// A DOCUMENT MUST HOLD FOCUS, not merely exist. If focus is null or on the context
-	// root, ProcessKeyDown dispatches to the root (Context.cpp:534-537), whose
+	// root, ProcessKeyDown dispatches to the root (Context.cpp:562-565), whose
 	// ProcessDefaultAction is Element's and has no navigation in it -- so no key moves
 	// focus and consuming one would be a lie. If focus is on something INSIDE a document,
 	// bWantsKeyboardFocus is already true and these are irrelevant (and false: the loop

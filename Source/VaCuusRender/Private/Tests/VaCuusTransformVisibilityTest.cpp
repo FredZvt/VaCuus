@@ -31,7 +31,7 @@
  *
  * WHY THE ASSERTIONS READ THE RECORDED SetTransform STREAM rather than the element's own state. The
  * null-ness of `Element::GetTransformState()` IS observable from here -- the accessor is public
- * (Include/RmlUi/Core/Element.h:576) and VaCuusInteractiveSnapshot.cpp:432 null-checks it across the
+ * (Include/RmlUi/Core/Element.h:576) and VaCuusInteractiveSnapshot.cpp:547 null-checks it across the
  * same module boundary -- so a TestNull/TestNotNull pair would prove the RmlUi fix in four lines. The
  * stream is read instead because what VaCuus ships is the command buffer: the recorder is the seam the
  * replayer consumes, so "the matrix reaches the buffer" is the assertion a re-vendor has to keep.
@@ -40,7 +40,7 @@
  * export). The stream gives that back. RmlUi emits a SetTransform command only when the active matrix
  * actually changes (RenderManager::SetTransform, RenderManager.cpp:144-154), and
  * ElementUtilities::ApplyTransform passes nullptr for an element without a state
- * (ElementUtilities.cpp:375-379), so a member stuck without one forces an explicit identity into the
+ * (ElementUtilities.cpp:383-387), so a member stuck without one forces an explicit identity into the
  * recording, which the recorder stores as FVaCuusCommand's default Transform.
  *
  * WHY TARGETS ARE COMPARED AGAINST pane_reference's RECORDED MATRIX rather than a hand-built scale(2).
@@ -176,7 +176,7 @@ static const FVector2f GReferenceTranslation(10.f, 10.f);
 /** pane_reference's matrix in Buffer, after asserting that it draws and not under identity: the
  *  positive control that the rig applies #window's transform at all, so a later identity is the bug
  *  and not a broken fixture. It is recorded afresh every frame because Context::Render ends in
- *  ResetState (Context.cpp:239), which returns the active matrix to identity (RenderManager.cpp:187-190,
+ *  ResetState (Context.cpp:236), which returns the active matrix to identity (RenderManager.cpp:187-190,
  *  RenderManager.h:37) and so defeats the dedupe across frames. */
 static bool ReferenceTransformIn(FAutomationTestBase& Test, const FVaCuusCommandBuffer& Buffer, const TCHAR* Frame, FMatrix44f& OutTransform)
 {
@@ -214,7 +214,7 @@ static void TestDrawsUnderReference(FAutomationTestBase& Test, const FVaCuusComm
 /**
  * THE RESTORE-THE-BUG CASE, upstream's shape. Two panes become visible AFTER #window's scale(2) has
  * been resolved by an earlier frame, one through `display`, one through `visibility` -- the ordering
- * a `data-if` (inline `display: none`, DataViewDefault.cpp:259-261) produces inside a transformed
+ * a `data-if` (inline `display: none`, DataViewDefault.cpp:264-266) produces inside a transformed
  * panel. Plain property flips keep the test independent of VaCuus's data-binding layer.
  *
  * Without Patch #7 both targets draw at their correct, unscaled layout offsets but under an explicit
@@ -289,8 +289,8 @@ bool FVaCuusTransformAfterVisibilityChangeTest::RunTest(const FString& Parameter
 
 /**
  * THE SECOND ROUTE: content created under a parent that has not rendered yet, which is what
- * DataViewFor::Update does to every clone (InsertBefore at DataViewDefault.cpp:551, then SetInnerRML
- * at :555). Two inserts after #window's matrix has resolved:
+ * DataViewFor::Update does to every clone (InsertBefore at DataViewDefault.cpp:563, then SetInnerRML
+ * at :567). Two inserts after #window's matrix has resolved:
  *
  * - pane_direct, a leaf appended straight under #window, is the CONTROL. #window holds a
  *   transform_state, so SetParent dirties the leaf (Element.cpp:2190-2192) and it renders correctly

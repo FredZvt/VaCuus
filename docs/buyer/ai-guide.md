@@ -58,8 +58,9 @@ Plugins/VaCuus/docs/buyer/rcss-matrix.md.
 | --- | --- |
 | Before the first document | [`setup.md`](setup.md) §2 — where files live, and the two host classes |
 | Before writing any style | [`rcss-matrix.md`](rcss-matrix.md) — the supported surface, generated |
-| Before the first authoring session | [`gotchas.md`](gotchas.md) — 26 numbered recorded findings |
+| Before the first authoring session | [`gotchas.md`](gotchas.md) — 27 numbered recorded findings |
 | Before optimising anything | [`perf-guide.md`](perf-guide.md) — measured budgets, not guesses |
+| Before adding vector assets | [`vector-assets.md`](vector-assets.md) — SVG/Lottie markup, bundles and rasterization cost |
 | Before the second language | [`localization.md`](localization.md) — the table, the two readers' different timing, and the Latin-only shipped font |
 
 `gotchas.md` is the highest-value page for an agent and it is worth reading in full once.
@@ -120,8 +121,11 @@ machine before you go blaming your document:
 
 ```bash
 <Engine>/Binaries/<Platform>/UnrealEditor-Cmd <Project>.uproject \
-  -ExecCmds="Automation RunTests VaCuus, Quit" -unattended -nullrhi -nosplash
+  -unattended -nullrhi -nosplash -ExecCmds="Automation RunTests VaCuus; Quit"
 ```
+
+It exits by itself with a status -- 0 when everything passed -- because that `Quit` belongs
+to `Automation` (it splits its own argument on `;`); `setup.md` §4 items 1 and 4.
 
 Render your own screen headlessly and look at the pixels:
 
@@ -130,6 +134,16 @@ Render your own screen headlessly and look at the pixels:
   -game -RenderOffscreen -ForceRes -resx=1920 -resy=1080 \
   -ExecCmds="<your console command that shows the UI>,"
 ```
+
+Press a button the same way the player would, by its id, and read who took the press:
+
+```bash
+  -ExecCmds="<your console command that shows the UI>, vacuus.Click ready-btn 1.0,"
+```
+
+The log line ends `taken by THE UI` or `taken by THE GAME`; a missing or hidden element is
+an Error naming why. Prefer it to `vacuus.M2Demo.Drag`'s coordinates for anything but a
+drag: coordinates move with every `data-if` and every resize.
 
 `setup.md` §4 has the four traps in that pipeline, each with the engine line that causes
 it. The two that waste the most agent time: **`-ExecCmds` splits on commas, not
@@ -185,6 +199,16 @@ without rendering it, is a guess — mark it as one.
 - Text is invisible, log repeats "No font face defined" → `gotchas.md` #5, and remember
   `@font-face src` is root-relative.
 - Data binding shows nothing, one Error at load → `gotchas.md` #9, bind before load.
+- Raw `{{Field}}` on screen, a Warning that the model "could not be bound" → the struct's
+  fields are not Blueprint-exposed; the Warning lists them. `setup.md` §2, "Binding and input
+  rules", rule 1.
+- A list renders no rows, or a row is missing a member → a container inside an array
+  element; the Warning names the array and the member. Same section, rule 2.
+- A loop prints the field's NAME (`Text`, `Color`) instead of its value → the `data-for`
+  alias equals `t` or a top-level field; the log has an Error naming the element. Rule 3.
+- A button looks right and its press goes to the game → nothing marks it interactive; rule 5.
+  The second press of the same button does nothing → its request field never went back to
+  idle; rule 4.
 - Text renders as boxes after switching language → `gotchas.md` #5; the shipped face is
   Latin-only and the log names the first missing character once.
 - A language switch moved some strings and not others → `gotchas.md` #21; parse-time text

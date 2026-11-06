@@ -2,8 +2,9 @@ RmlUi, vendored for VaCuusRml
 =============================
 
 upstream: https://github.com/mikke89/RmlUi
-commit:   0ae381e00d7426762bb5ed897973366358b16642
-vendored: 2026-07-29
+tag:      6.3
+commit:   ba95ffe8bfb6370efb2cdcca927eaad4710c5413
+vendored: 2026-10-20
 
 VENDORED_SHA.txt NEXT TO THIS FILE HOLDS THAT SHA AND NOTHING ELSE, and must keep
 holding nothing else: Tools/gen_rcss_matrix.py:43,180 reads the whole file and
@@ -12,28 +13,43 @@ human half -- what is here, and the local patches. Read both before re-vendoring
 
 What is here, and why exactly this
 ----------------------------------
-Vendored per docs/superpowers/plans/2026-07-29-vacuus-m1-render-spike.md:114-122:
+The M1 Core-only recipe was extended on 2026-10-20 to retain the SVG and Lottie plugins:
 
     cp -r Include Source Backends LICENSE.txt readme.md $DEST/
-    rm -rf $DEST/Source/Lua $DEST/Source/SVG $DEST/Source/Lottie
+    rm -rf $DEST/Source/Lua
     echo "<sha>" > $DEST/VENDORED_SHA.txt
 
-Backends/ is reference material and is never compiled. Only Source/Core is built,
-through the per-file relay .cpp files that Source/VaCuusRml/Private/Gen/ generates:
-gen_relays.sh walks Source/Core alone, so all 190 relays there are relay_Core_*.cpp,
-one per .cpp under Source/Core. Source/Debugger is vendored and SHIPS as source -- its
-LICENSE.txt is a disclosure Tools/fab_inventory.sh asserts reaches the package -- but no
-module compiles it and nothing in the plugin names RmlUi/Debugger.h or Rml::Debugger.
+Backends/ is reference material and is never compiled. Core, SVG and Lottie compile
+through per-file relay .cpp files in Source/VaCuusRml/Private/Gen. The same generator
+writes dependency relays to Private/VectorGen (C for PlutoVG, C++ for LunaSVG and
+rlottie). UBT builds every dependency from source, with no platform archives.
+Source/Debugger remains reference source, not compiled. The vector dependency pins,
+licenses and patches are in ../lunasvg/VENDORED_TAG.txt and ../rlottie/VENDORED_TAG.txt.
 
 Local patches
 -------------
-This tree was byte-identical to the upstream commit above until 2026-08-03.
+Local patches #1-6 and #8-15 are retained on top of stable 6.3, including the
+owner follow-ups below. Patch numbers are stable identifiers, not a count.
+Patch #7 was retired on 2026-10-20: upstream 6df503c is included in 6.3.
+BuildLocalStackingContext must match upstream exactly; do not duplicate its loop.
+
 Re-vendoring procedure: copy the file list above from the pinned commit, reapply
-the patch(es) below, then run the verification named with each one -- a patch
-that is silently lost re-introduces a defect nobody can see on screen. A patch
-whose entry names the upstream commit it backports (#7 is the first) is DROPPED,
-not reapplied, once the pinned SHA is at or after that commit; its verification
-must still pass, and a doubled hunk is exactly what it cannot see.
+only patches not already present upstream, update the container snapshots below,
+regenerate the relay .cpp files, and run the verification named with each patch.
+Source/Core/ScriptInterface.cpp is new in 6.3 and must have a generated relay.
+
+Bundled container snapshots (updated independently of RmlUi on 2026-10-20):
+- robin_hood.h: martinus/robin-hood-hashing tag 3.11.5, src/include/robin_hood.h.
+- itlib/flat_map.hpp and flat_set.hpp: iboB/itlib tag v1.12.3, include/itlib/.
+  Individual header versions are flat_map 1.11 and flat_set 1.09.
+- Containers/LICENSE.txt contains the full licenses from those two tags.
+Container compatibility patch: robin_hood.h excludes Clang from its GCC < 5
+workaround. Clang advertises __GNUC__ == 4 but supports std::is_trivially_copyable;
+the old branch chooses deprecated __has_trivial_copy and UE Clang treats that
+warning as an error when instantiated from plugin code. The unpatched editor
+build failed on 2026-10-20; the patched build must compile without suppressing
+warnings. itlib headers are unmodified. Preserve ITLIB_FLAT_MAP_NO_THROW in
+VaCuusRml.Build.cs for exception-free engine builds.
 
 Patch #1 -- data-style compares against the unit-less variant (bead VaCuus-akj.17).
 
@@ -46,14 +62,14 @@ back as "100" and never compares equal to the string that produced it. Every dir
 the bound variable therefore called Element::SetProperty with an unchanged value, and
 SetProperty does not compare either (ElementStyle.cpp:642-654 -> PropertyDictionary
 ::SetProperty + DirtyProperty, unconditional), nor does ComputeValues, which returns
-the DIRTY set rather than a changed-value set (ElementStyle.cpp:1058-1062). So the
+the DIRTY set rather than a changed-value set (ElementStyle.cpp:1060-1064). So the
 element restyles, and a layout property relayouts the whole document, every time.
 
 Whether that also costs a PUBLISHED frame depends on which property is bound, and the
 first version of the test below got this wrong -- it bound `width`, and passed with
 the patch reverted. Two RmlUi shortcuts absorb the layout-only path: an unchanged box
 never reaches OnResize, and ElementText reuses its compiled geometry when the
-regenerated mesh compares equal (ElementText.cpp:530-536). The border/background path
+regenerated mesh compares equal (ElementText.cpp:541-547). The border/background path
 has no such check -- ElementBackgroundBorder::GenerateGeometry releases and re-makes
 its mesh unconditionally (ElementBackgroundBorder.cpp:181-187) -- so a no-op write to
 border-*-width, border-radius or box-shadow is a fresh handle plus resource traffic,
@@ -484,132 +500,6 @@ mikke89/RmlUi master 2026-08-11: both headers still carry the forward-declaratio
 only pattern, so the defect is live upstream for any strict-libc++ consumer.
 
 
-Patch #7 -- a transformed stacking context never re-dirties elements that join it later.
-Backport of upstream mikke89/RmlUi 6df503c; EXPIRES at the first re-vendor at or after
-it (bead VaCuus-74s).
-
-Applied 2026-09-14 from PR #2, ahead of our own next re-vendor, with the corrections of
-bead VaCuus-kga. Element.cpp line numbers in this entry and in its test are for THIS
-tree, with the hunk applied; upstream's pre-patch numbers are 7 lower from line 2380 on.
-
-Symptom: an element that becomes visible underneath an ancestor with its own
-`transform` renders unscaled -- full size, at its untransformed layout position --
-instead of picking up the ancestor's resolved matrix. A VaCuus document hits this
-whenever a `data-if` (inline `display: none`, DataViewDefault.cpp:259-261) flips true
-inside a panel whose transform already resolved; and, by a second route, whenever a
-`data-for` clone is created inside such a panel: the clone's own box scales, the
-content filled into it does not. The same missing state breaks hit-testing for those
-elements too: the interactive snapshot gates its projected path on GetTransformState()
-(Source/VaCuusRender/Private/VaCuusInteractiveSnapshot.cpp:432), so the untransformed
-rect is what the game thread hit-tests -- consistently wrong on both channels.
-
-Cause, in this vendored tree:
-- The only way a member of a transformed stacking context gets its matrix is the
-  propagation loop at the end of `Element::UpdateTransformState`
-  (Element.cpp:3037-3041): it runs over the CURRENT `stacking_context` members, and
-  only when the container's matrix actually CHANGED in this render
-  (`perspective_or_transform_changed`, :3037). It is not gated by the dirty flag.
-  `dirty_transform` is sticky -- the only write is the `|=` at :2892, with no
-  `= false` twin of the perspective reset at :2953 -- so a container that ever held a
-  matrix recomputes its (unchanged) matrix on every render for life, propagating
-  nothing, and the early-out at :2897 is only ever taken by an element that has NEVER
-  been dirtied. Dirtying the container from the visibility path is therefore not an
-  alternative fix: it is already dirty.
-- `AddToStackingContext` skips invisible elements (Element.cpp:2397-2398), and
-  `visible` is false under `display: none` and `visibility: hidden` alike (:1856-1857),
-  so a hidden element was not a member while the container's matrix resolved, and the
-  one propagation that would have reached it has already happened.
-- `SetParent` dirties a newly-parented element only when it or its NEW PARENT already
-  holds a transform_state (Element.cpp:2190-2192). Every rendered member of a
-  transformed subtree holds one (:3002-3028 copies the stacking parent's matrix into
-  each member's own state), so a leaf inserted under a rendered member IS dirtied and
-  renders correctly without this patch -- that is not the bug, and a test that inserts
-  a leaf passes with the hunk reverted (AfterLateInsert keeps one as its control). The
-  insert that fails is content under a parent that has not rendered yet, which is what
-  DataViewFor::Update does to every clone: InsertBefore (DataViewDefault.cpp:551;
-  dirtied, its parent has a state) and then SetInnerRML (:555) while the clone's own
-  state is still null, so the content is parented without a dirty. The clone's first
-  render then propagates over ITS `stacking_context`, which is empty because a plain
-  block is not a stacking-context container -- the content lives in the CONTAINER's
-  flat list -- and the content renders under identity.
-- `BuildLocalStackingContext` rebuilds the flat member list on every DOM insert/remove
-  and every display/visibility/z-index change (`DirtyStackingContext` marks the closest
-  container, Element.cpp:2489-2493) without dirtying anyone (:2362-2372, the body
-  before the hunk), and is reached from two places: `Element::Render` (:188-189, before
-  that element's own UpdateTransformState at :191) and `Context::GetElementAtPoint`
-  (Context.cpp:1407-1408, the hover and input paths, during Update).
-So an element that joins the container's stacking context after the container's matrix
-last changed is added to the list and never told to compute -- it keeps whatever state
-it had, which for a hidden-from-birth or freshly-created element is none, i.e. identity.
-The reverse direction self-heals: an element that once held a matrix stays dirty and
-recomputes each render, which is also why the hunk's one-directional guard is enough.
-
-The change: `Element::BuildLocalStackingContext` (:2373-2379) now dirties every member
-of the freshly-rebuilt list whenever the container itself holds a transform_state --
-
-	// If the stacking context changed, any previously hidden elements may not have had their transforms updated. Ensure they will be updated now.
-	if (transform_state)
-	{
-		for (Element* child : stacking_context)
-			child->DirtyTransformState(false, true);
-	}
-
-Upstream reference: mikke89/RmlUi commit 6df503c (2026-08-16), "Fix transform not
-being applied after element turns visible, see #982". The Element.cpp hunk here is
-byte-identical to upstream's. The rest of that commit is a comment typo in
-TransformState.h and doctest support under Tests/, which this tree does not vendor
-(see "What is here, and why exactly this" above); the doctest is ported as an
-automation test instead, below.
-
-Cost: no element changes cost class. Every member that already rendered correctly was
-already sticky-dirty and recomputing every render; the loop only adds the previously
-wrong-rendering members to that set, at one bool OR per member per rebuild. The rebuild
-runs only while `stacking_context_dirty` is set, not every frame, but the list it walks
-is the FLAT one (AddChildrenToStackingContext recurses through every descendant that is
-not itself a stacking-context container), so a rebuild of a large transformed panel
-touches all of its descendants. The GetElementAtPoint rebuild can run the loop during
-Update; that only sets flags -- matrices are computed in Render, after layout -- so it
-is benign.
-
-One-frame consequence for VaCuus, noted so nobody files it as a regression: the
-interactive snapshot is built between Update() and Render()
-(Source/VaCuusRender/Private/VaCuusRmlDocumentHost.cpp:640-672), and the newly-shown
-element's transform_state appears in that frame's Render, so on the reveal frame the
-snapshot hit-tests the untransformed rect and converges on the next. It is the same lag
-any transform property change already has (OnPropertyChange dirties,
-Element.cpp:1962-1963; Render computes). Before this patch the two channels were
-wrong-but-consistent forever.
-
-VERIFICATION (the re-vendoring check): two automation tests in
-Source/VaCuusRender/Private/Tests/VaCuusTransformVisibilityTest.cpp, both reading the
-recorded RenderInterface::SetTransform stream (FVaCuusRecordingRenderInterface) -- the
-file header says why that seam and not GetTransformState(). Each has a positive control
-(an always-visible reference pane, seen to draw under a non-identity matrix) and
-compares every target against the reference's recorded matrix in the same frame.
-- VaCuus.Render.Transform.AfterVisibilityChange, the port of upstream's doctest
-  `Element.TransformStateAfterVisibilityChange` with both of its SUBCASEs:
-  `#window { transform: scale(2) }` holds the reference, a `display: none` pane and a
-  `visibility: hidden` pane; one frame after the scale resolved both are shown and
-  must draw under the reference's matrix.
-- VaCuus.Render.Transform.AfterLateInsert, the data-for shape: after frame 1 a leaf is
-  appended straight under #window (the control -- correct with or without the hunk,
-  see the SetParent bullet) and a wrapper is appended and then filled with SetInnerRML;
-  the nested pane must draw under the reference's matrix.
-Restore-the-bug, Linux clang, 2026-09-14, with ONLY the Element.cpp hunk reverted and
-the tests unchanged: AfterVisibilityChange fails exactly its four matrix assertions
-("draws under pane_reference's matrix" and "draws under a non-identity transform", for
-pane_display and for pane_visibility); AfterLateInsert fails exactly the same two for
-pane_nested while both of pane_direct's hold; every positive control and every "does
-not draw while hidden" check still passes. Hunk restored: both Success. The PR author
-saw the display case fail and pass the same way on UE 5.8 Win64.
-
-Drop this patch when RmlUi is re-vendored at or after 6df503c. Reapplying it on top of
-an upstream tree that already carries it doubles the loop with nothing to flag it:
-DirtyTransformState is an idempotent OR (Element.cpp:2891-2892) and both tests pass
-either way. Diff the re-vendored BuildLocalStackingContext against the hunk first, in
-case the upstream form has moved, then remove this entry (bead VaCuus-74s).
-
-
 Patch #8 -- a shrinking `data-for` evaluates the rows it is about to remove.
 
 One file, one hunk: Source/Core/DataViewDefault.cpp, DataViewFor's constructor passes a sort bias
@@ -640,20 +530,20 @@ Cause, in this tree (line numbers WITH the hunk applied):
   (DataView.cpp:27-36). The comment above the sort gives the intent -- "the 'data-for' view will
   remove children if any of its data variable array size is reduced" (:102-103) -- but the rows are
   not its children. DataViewFor::Update inserts every row as a SIBLING, before the template element
-  (DataViewDefault.cpp:551).
+  (DataViewDefault.cpp:563).
 - A row's views are constructed when the row is parented: SetParent sets `parent` (Element.cpp:2181)
   and then calls SetDataModel (:2206), which runs ApplyDataViewsControllers (:2162). By then the row
   is already at the template's depth. A row carries the template's attributes minus `data-for`
-  (DataViewDefault.cpp:514-519), so its data-attr, data-class, data-if and so on are views on the row
+  (DataViewDefault.cpp:526-531), so its data-attr, data-class, data-if and so on are views on the row
   element itself, at the depth of the data-for view. Their bias is 0 (DataViewDefault.cpp:22, through
-  :60 and :198) or higher (data-value 100 and data-checked 110, :17 and :19). The data-for view's
+  :60 and :203) or higher (data-value 100 and data-checked 110, :17 and :19). The data-for view's
   bias was 0 as well.
 - So the data-for view and the row views with bias 0 share one sort key. Every row view is dirty
   whenever the array is, because an aliased `r.Id` reduces to the root name `Replies`
-  (DataExpression.cpp:1145-1155). std::sort keeps equal keys in no defined order, and the sort
+  (DataExpression.cpp:1146-1156). std::sort keeps equal keys in no defined order, and the sort
   before it orders the views by pointer value (DataView.cpp:98), so which one runs first depends on
   heap addresses. A row view that runs after the data-for view finds its element already
-  destroyed (the RemoveChild(...).reset() at DataViewDefault.cpp:562) and is skipped
+  destroyed (the RemoveChild(...).reset() at DataViewDefault.cpp:574) and is skipped
   (DataView.cpp:112). A row view that runs BEFORE it evaluates `Replies[2]` against the shrunk array,
   gets an empty variable back from DataModel::GetVariable (DataModel.cpp:285-290), and logs the
   warning (DataModel.cpp:321).
@@ -696,10 +586,10 @@ NOT yet offered upstream -- same standing as patches #1-#6.
 Patch #9 -- text-transform changes the case of ASCII letters only.
 
 One file: Source/Core/ElementText.cpp. The old BuildToken body becomes BuildTokenUntransformed
-(:569, same logic, the transform parameter and the ASCII-only transform block removed), and a new
-BuildToken with the old signature (:807) calls it and then, for Uppercase or Lowercase, re-encodes
-the token code point by code point (TransformTextCase, :783). The forward declaration (:21) and both
-call sites in GenerateLine (:264, :302) are untouched.
+(:580, same logic, the transform parameter and the ASCII-only transform block removed), and a new
+BuildToken with the old signature (:818) calls it and then, for Uppercase or Lowercase, re-encodes
+the token code point by code point (TransformTextCase, :794). The forward declaration (:21) and both
+call sites in GenerateLine (:265, :308) are untouched.
 
 THE DEFECT IS UPSTREAM'S. BuildToken walks the UTF-8 text one BYTE at a time
 (`char character = *token_begin;`) and applied the transform only to `a-z` / `A-Z` (pre-patch
@@ -754,3 +644,534 @@ style attribute overrides. VaCuus.Rml.TextTransform.InputByteParity guards that 
 removed it fails -- End in an uppercase "kap" + dotless i field snaps back before the dotless i
 and the typed 'x' lands inside the word; with :169 present it passes. A re-vendor that drops
 :169 must make the transform length-preserving on that path instead.
+
+Patch #10 -- a write the data model delivered elsewhere is not a failed assignment (bead VaCuus-w87.1).
+
+Three files. Include/RmlUi/Core/DataVariable.h gives VariableDefinition three statics (:59-69):
+public ResetAssignmentDelivered and ConsumeAssignmentDelivered, protected MarkAssignmentDelivered.
+Source/Core/DataVariable.cpp defines them over one plain static flag at the end of the file
+(:171-189). Source/Core/DataExpression.cpp's Assign instruction resets the flag, runs the
+assignment, and reports "Could not assign to variable." only when Set() returned false AND the flag
+was not set (:1070-1072).
+
+THE DEFECT IS THE CONTRACT'S, NOT UPSTREAM'S CODE. RmlUi reads a false Set() as "the assignment
+failed" and, separately, as "do not dirty the variable" -- both call sites skip DirtyVariable on
+false (DataExpression.cpp:1192-1195 in SetValue, DataControllerDefault.cpp:57-59). VaCuus's write
+router needs the second without the first: FVaCuusScalarDefinition::Set hands the value to the game
+thread and returns false so the UI shadow is never written (invariant I3). The Assign path then
+logged "Error during execution. Could not assign to variable.", "Failed to execute program with N
+instructions:" and a program dump on EVERY correct data-event-click -- 27 Warning lines in one
+six-minute session in the 2026-10-06 field report, which broke ai-guide.md's rule that a clean
+LogVaCuus is evidence. The change-controller path (data-checked, data-value) never logged.
+
+Reset before, consume after: a stale mark from a change-controller Set, which nobody consumes, can
+never excuse a later assignment that fails before reaching Set (an address GetVariable cannot
+resolve). The REFUSAL path in FVaCuusScalarDefinition::Set does not mark, so a write nobody received
+keeps RmlUi's line.
+
+Line shifts: DataVariable.h +5 from :59 and +9 from old :62; DataExpression.cpp +1 from old :1071.
+Every in-repo citation into either file was moved by that map, each one checked by comparing the
+HEAD line with the shifted current line (all equal); docs/research notes were left as dated records.
+
+Tests: VaCuus.Js.Router.WriteRoutesAndReverts asserts zero "Could not assign to variable" and zero
+"Failed to execute program" lines over its routed clicks; VaCuus.Model.ArrayBinding asserts exactly
+2 over its two REFUSED clicks. Restore-the-bug, Linux, UE 5.8 source editor, -nullrhi, 2026-10-06:
+patch absent -> the router test reads 2 and 2 (Fail); patch present -> both pass, ArrayBinding
+passes either way.
+
+Patch #11 -- a data-for alias that a top-level variable shadows is an Error naming element and document (bead VaCuus-w87.5).
+
+Two files. Source/Core/DataViewDefault.cpp: DataViewFor::Initialize checks the iterator and index
+aliases against the model's top-level variables and logs LT_ERROR once per data-for, with the
+template's address and its document's source URL (:501-506). Source/Core/DataModel.cpp:
+InsertAlias's generic LT_WARNING ("Alias variable '%s' is shadowed by a global variable.") becomes
+the same LT_ERROR, reported only for an element that is already placed -- the data-alias path --
+because a data-for row is inserted BEFORE it is parented (DataViewDefault.cpp:560-563) and has no
+address or document to name (:191-192, edited in place). Both files now include ElementDocument.h
+IN PLACE OF Element.h (which it includes) for GetSourceURL, so neither include block grew a line.
+
+THE DEFECT: DataModel::ResolveAddress tries the top-level variables before any alias
+(DataModel.cpp:234-236), so a shadowed alias is unreachable. Every VaCuus model binds the
+translation variable `t`, and `data-for="t : Traits"` printed the key fallback "Text" on every card
+of a shipped-looking screen while the only diagnostic named neither document nor element.
+
+Line shifts: DataViewDefault.cpp +7 from old :496 (on top of patch #12's +5 from :190); DataModel.cpp
+none. Test: VaCuus.Model.AliasShadowed (VaCuusBindDiagnosticsTest.cpp) -- one Error per data-for for
+`t` and for an ordinary field name, naming `div < div#trows < body` and the document URL, and zero
+of RmlUi's old generic Warning. Seen red before the patch (Fail: no Error, 4 generic Warnings).
+
+Patch #12 -- an empty string in a data-style binding unsets the property; the parse Warning names the element (bead VaCuus-w87.8).
+
+Two files. Source/Core/DataViewDefault.cpp, DataViewStyle::Update -- patch #1's function -- gains
+an empty-value branch that calls Element::RemoveProperty (:189-193): CSSOM's `style.color = ''`
+semantics. Source/Core/Element.cpp's "Syntax error parsing inline property declaration" Warning
+gains " on <element address>" (:597, edited in place, no shift).
+
+THE DEFECT: an empty bound string was handed to SetProperty, failed to parse, warned with no
+element named, and repeated on every update of the variable -- and bindings under a false data-if
+keep evaluating (data-if only writes display:none), so a HIDDEN card with default-constructed
+colour fields produced the noise with nothing on screen to explain it. Worse than noise: returning
+a field to "" left the previous colour in place.
+
+Line shifts: DataViewDefault.cpp +5 from old :190. Test: VaCuus.Model.EmptyStyleValue -- "" sets
+nothing and warns nothing; a colour then "" again removes it; a malformed value still warns, now with
+`div#swatch`. Seen red before the patch (one parse Warning per empty write; the stale colour stayed).
+
+Patch #13 -- a font weight no face of the family has is reported once (bead VaCuus-w87.13).
+
+Two files. Source/Core/FontEngineDefault/FontFamily.h gives FontFamily a set of reported
+(style, weight) misses (:42-43); FontFamily.cpp's GetFaceHandle logs one LT_WARNING per miss when
+the face it chose has a different weight from the one asked for (:50-54), and includes Log.h (:3).
+
+THE DEFECT: GetFaceHandle silently draws the nearest weight. VaCuus ships one face, LatoLatin-Regular,
+so every `font-weight: bold` rule draws regular with nothing logged. Owner decision 2026-10-06: a
+Warning, no bold face shipped. The test is the chosen face's weight, not the loop's best distance --
+a non-matching face met BEFORE an exact match leaves the distance finite, and testing it reported a
+miss that was not one (caught in review before the first build).
+
+Line shifts: FontFamily.h +3 from old :42; FontFamily.cpp +1 from :3 and +6 from old :48; no in-repo
+citations into either file existed. Test: VaCuus.Font.MissingWeight -- two bold paragraphs, one
+Warning. Restore-the-bug, 2026-10-06: Warning removed -> expectation unmet (Fail); latch removed ->
+"found 2 time(s)" (Fail); both present -> pass.
+
+NOT yet offered upstream, any of #10-#13. #11, #12 and #13 are upstream-shaped as they stand; #10
+exists for a write router upstream does not have, and would need a reason to be accepted.
+
+Patch #14 -- a fractional font-size loads the face one whole pixel below it.
+
+One file, one hunk: Source/Core/ElementStyle.cpp, ElementStyle::ComputeValues asks the font engine
+for the face at Math::RoundToInteger(font_size) instead of (int)font_size (:1035-1038).
+
+THE DEFECT IS UPSTREAM'S. The font engine keys a face by a whole pixel size
+(Include/RmlUi/Core/FontEngineInterface.h:68), and the computed font-size is a float that is whole
+only when it was authored in px: dp is the number times the context's ratio
+(Source/Core/ComputeProperty.cpp:62), which VaCuus sets per view (VaCuusUIThread.cpp:1716-1720),
+and em, rem, vw and vh scale the same way. The cast always went down, so a size a hair under a
+pixel lost the whole pixel -- 10.95px drew at 10, 13dp at a ratio of 1.5 (19.5px) at 19 -- while
+the line height, computed from the float, kept the full size. Found in a game that sets
+`body { font-size: 0.0925926vh; }` so its UI scales with the window: below 1080 high nearly every
+size is fractional, and each caption drew up to a pixel small.
+
+Math::RoundToInteger rounds half away from zero (Source/Core/Math.cpp:121-127), so 10.5 is 11.
+This is the only place Source/Core turns a computed font-size into a face size; every other
+GetFontFaceHandle in it is Element's accessor for the handle stored here.
+
+Line shifts: ElementStyle.cpp +2 from old :1037. Two in-repo citations moved, each compared with
+the line it named on master (equal): this file's (ElementStyle.cpp:1060-1064, top of the file) and
+docs/buyer/gotchas.md (:1249). Dated design notes under docs/superpowers were left as records.
+
+Test: VaCuus.Font.FractionalSize (Source/VaCuus/Private/Tests/VaCuusFontSizeTest.cpp) -- divs at
+10.95px, 10.5px and 13dp with the context's dp ratio at 1.5, and two controls at 10.4px and 11px;
+it reads the size of the face each one's computed values hold, through
+FontEngineInterface::GetFontMetrics. Restore-the-bug, Win64, UE 5.8 host editor, -unattended
+-nullrhi, 2026-10-16:
+  - patch absent: Result={Fail} on the three fractional divs only -- faces of 10, 10 and 19 px
+    against 11, 11 and 20; both controls passed;
+  - patch present: Success; the rest of VaCuus. green alongside it (280 of 280).
+
+NOT yet offered upstream. Upstream-shaped as it stands.
+
+Patch #15 -- text is laid out on whole pixels, so small type spaces unevenly and drops its tracking.
+
+Files: Include/RmlUi/Core/FontGlyph.h (advance_exact :17-19, and WeakCopy carrying it :36 -- a
+fallback-face glyph without it advances by 0 and the next glyph lands on top of it),
+Source/Core/FontEngineDefault/FreeTypeInterface.h/.cpp (GetKerning :214-241, the replacement glyph
+:272, BuildGlyph and its bitmap-strike scaling :340-346 and :356), FontFaceHandleDefault.h/.cpp (the
+Math.h include, StringWidthToPixels :18-24, GetStringWidth :68-102, GenerateString :187-264, the
+kerning cache and its value type, GetKerning), FontFaceLayer.h (the Math.h include, GenerateGeometry
+:59-79), Source/Core/ElementText.cpp (GenerateLine, the two token measurements :267-272 and :311-314),
+Source/Core/Elements/WidgetTextInput.cpp (FormatText, the trailing spaces :1308). Every hunk of this
+patch, at git's default three lines of context, carries "VaCuus patch #15": grep for it, and expect
+it on includes and one-word type changes too.
+
+Symptom: a root font-size in vh (a game's `body { font-size: 0.0925926vh; }`, so its UI scales with
+the window) makes every length fractional below 1080 high. An 11 px caption reads "INT ERACT IVE":
+neighbouring gaps differ by up to a pixel and a half where the face meant them equal; 0.12em of
+tracking on 9 px type vanishes; -0.05em never applies.
+
+Cause, upstream behaviour at the pinned SHA (pre-patch lines):
+- a glyph advances by `metrics.horiAdvance >> 6` (FreeTypeInterface.cpp:336, BuildGlyph). The glyph
+  is loaded hinted (:296, FT_LOAD_COLOR alone), so FreeType has already grid-fitted that advance to
+  a whole pixel (FreeType 2.14.1 src/base/ftobjs.c:889, called at :1079-1081);
+- `letter_spacing` is cast to int per glyph (FontFaceHandleDefault.cpp:80 in GetStringWidth, :239
+  in GenerateString), so anything under a pixel is 0;
+- kerning is FT_KERNING_DEFAULT shifted down (FreeTypeInterface.cpp:232-237, GetKerning). DEFAULT
+  already returns whole pixels: below 25 ppem it scales the pair by ppem/25, then rounds it to the
+  nearest pixel with FT_PIX_ROUND (FreeType 2.14.1 src/base/ftobjs.c:3630-3646, FT_Get_Kerning; the
+  macro is include/freetype/internal/ftobjs.h:91-92). UE 5.8 ships FreeType2-2.14.1 as headers and
+  libraries only, so the .c files cited here are upstream's tag VER-2-14-1. A pair under half a
+  pixel after that scaling was 0, and 9-13 px type was kerned at 36-52 % of the face's value before
+  the rounding;
+- the quad is placed at `(position + box.origin).Round()` (FontFaceLayer.h:57, GenerateGeometry).
+Computed from a game's ScienceGothic-SemiBold tables for "INTERACTIVE" at 10.95 px (drawn at the 10 px
+face patch #14 fixes): the ink gap per pair against the face's own (float advances, GPOS kerning,
+-0.05em) is off by -0.06 .. +0.95 px.
+Rounding each glyph's origin from a float pen instead was tried on paper and is no better (worse at
+13 px): only a fractional placement gives the designed gaps.
+
+The fix: the pen runs in float -- advance_exact from linearHoriAdvance, the unhinted advance in
+16.16 (FreeType's freetype.h:2106-2110), UNFITTED kerning in 26.6, the spacing as given. A glyph on
+a fraction keeps its quad on the grid one pixel wider, with its texture coordinates moved left by
+the fraction, and the bilinear sampler of VaCuus's textured draws (VaCuusReplayRenderer.cpp:1208)
+shifts the bitmap by exactly that. The extra column reads the transparent pixel the atlas keeps
+around every glyph: a row starts at x 2 and leaves two pixels after each rectangle
+(Source/Core/TextureLayoutRow.cpp:19, :53; two since the follow-up below), and the atlas starts transparent
+(Source/Core/TextureLayoutTexture.cpp:113-114). GetStringWidth/GenerateString still answer in
+whole pixels: up, less 0.001, so a box sized to its text never clips it and float noise on a
+whole sum does not add a pixel.
+
+UNFITTED also drops DEFAULT's small-size damping: below 25 ppem a pair now gets the face's full
+value, up to 25/ppem of what DEFAULT gave before rounding (2.8x at 9 px). Kerning is on unless
+`font-kerning: none` (FontFaceHandleDefault.cpp:355-358), so this shows by default. Only faces with
+a `kern` table are touched -- this FreeType reads no GPOS kerning (TT_CONFIG_OPTION_GPOS_KERNING is
+off, FreeType2-2.14.1 include/freetype/config/ftoption.h:798; FT_FACE_FLAG_KERNING comes from `kern`
+alone, sfobjs.c:1133-1138). The shipped LatoLatin has one (10920 pairs), so its small text kerns
+tighter than before, by the face's own amounts.
+
+Measuring a line (ElementText.cpp, GenerateLine): rounding every GetStringWidth up made the sum of
+a line's token widths run past what GenerateString draws by up to a pixel per token -- centred and
+right-aligned text sat off, a box sized to its text grew a tail, a line wrapped early. A token is
+now costed as W(line + token) - W(line), W being GetStringWidth from the line's start and W(line)
+the width the loop already holds, so a line measures exactly what GenerateString returns for it;
+the price is re-measuring the line so far once per token. WidgetTextInput::FormatText re-measures a
+line after appending its trailing spaces instead of adding a rounded-up space per space. Left as
+they are: separate runs are placed at whole-pixel widths -- inline boxes on one line
+(Layout/LineBox.cpp:78) and WidgetTextInput's selected, unselected and IME runs -- so each boundary
+can shift the run after it by up to a pixel (placing it exactly needs a fractional width, i.e. a new
+FontEngineInterface entry); and `cols`/`size` x W("m") in ElementFormControlTextArea/InputTypeText
+is a size hint, at most a pixel per column wide, never narrow.
+
+Cost: a glyph off the grid is resampled, a little softer than one on it. Kerning from GPOS (faces
+with no `kern` table) is still not read -- that needs a shaper, separate work. Line breaking
+measures tokens x line length per line instead of the line's length once.
+
+Line shifts: FontFaceHandleDefault.cpp +1 from old :2, +9 from old :17, +10 from old :81, +11 from
+old :240; FreeTypeInterface.cpp +3 from old :231, +2 from old :239, +3 from old :270, +8 from old
+:337, +9 from old :346; FontFaceLayer.h +1 from old :6, +21 from old :58; FontGlyph.h +3 from old
+:17, +4 from old :33; ElementText.cpp -4 from old :262, -1 from old :267, 0 from old :305;
+FreeTypeInterface.h +1 from old :36; FontFaceHandleDefault.h and WidgetTextInput.cpp in place.
+Moved in-repo citations, each compared with the line it named on master (equal):
+FontFaceHandleDefault.cpp:378-394 (was :367-383) in VaCuusFontRegistry.cpp, VaCuusUIQueues.h and
+VaCuusFontRegistry.h; :397-404 (was :386-393) in VaCuusFontRegistryTest.cpp, VaCuusFontRegistry.h
+and VaCuusSubsystem.h; patch #9's GenerateLine call sites above, :260 and :301 (were :264, :302; :265 and
+:308 after the follow-up below, whose numbers this entry's Files: paragraph already uses).
+Dated design notes under docs/superpowers were left as records.
+
+VERIFICATION (the re-vendoring check): seven automation tests in
+Source/VaCuus/Private/Tests/VaCuusFontSubpixelTest.cpp, on LatoLatin through the public
+FontEngineInterface:
+  - VaCuus.Font.Subpixel.LetterSpacing: 0.5 px of spacing over the eleven glyphs of "INTERACTIVE",
+    kerning off, adds 5 or 6 px to GetStringWidth.
+  - VaCuus.Font.Subpixel.FractionalPen: GenerateString of "H" with its pen moved by 0.25, 0.5 and
+    0.75 px moves the glyph by exactly that, read back from the quad's x and its texture coordinates.
+  - VaCuus.Font.Subpixel.LineWidth: GenerateLine's width of a twelve-word line at 0.37 px of
+    letter-spacing equals what GenerateString returns for it. Its control asks that the tokens
+    measured one by one sum to more, so the text can tell the two apart.
+  - VaCuus.Font.Subpixel.Advance: a hundred H at 16 px measure 1222 (1527/2000 em each, LatoLatin's
+    hmtx).
+  - VaCuus.Font.Subpixel.Kerning: twenty "To" kern at 10 px by their kerning at 50 px times 10/50;
+    its control asks that the run kerns at 50 px at all.
+  - VaCuus.Font.Subpixel.FallbackAdvance: a ZHE taken from a fallback face adds its own width between
+    two A. The fallback is the engine's Engine/Content/Slate/Fonts/Roboto-Regular.ttf, read at run
+    time; nothing is added to this repository.
+  - VaCuus.Font.Subpixel.ReplacementAdvance: the engine's replacement box for U+4E00 adds its 7 px
+    between two x (LatoLatin has no U+FFFD of its own).
+Restore-the-bug, Win64, UE 5.8 host editor, -unattended -nullrhi, 2026-10-16, one hunk at a time:
+  - patch absent (Include/ and Source/ at master, the tests kept): LetterSpacing (0 px added),
+    FractionalPen (shifts of 0, 1 and 1), LineWidth (its control: "12 words summed to 379 px, drawn
+    379 px"), Advance (1200) and Kerning (0 against -46.8) fail; FallbackAdvance and
+    ReplacementAdvance pass -- they guard a partial loss, not the whole patch;
+  - WeakCopy's line dropped: FallbackAdvance alone fails, 0 px against 13 or 14;
+  - the replacement box's line dropped: ReplacementAdvance alone, 0 against 7;
+  - FontFaceLayer.h at master: FractionalPen alone, shifts of 0, 1 and 1;
+  - ElementText.cpp at master: LineWidth alone, 412 measured against 408 drawn;
+  - FT_KERNING_DEFAULT back: Kerning alone, 0 against -46.8;
+  - advance_exact from horiAdvance: Advance alone, 1200;
+  - (int)letter_spacing back in GetStringWidth and GenerateString: LetterSpacing alone, 0 px added;
+  - WidgetTextInput.cpp at master: all seven pass -- no test sees that hunk;
+  - patch present: all seven Success, and the rest of VaCuus. green alongside them (286 of 286).
+
+NOT yet offered upstream.
+
+Patch #15 follow-up (owner, landing PR #23) -- defects the review found, each with a test.
+
+1. THE ATLAS GUTTER IS TWO TEXELS. Source/Core/TextureLayoutRow.cpp:19, :32, :53, and the page-size
+estimate in TextureLayoutTexture.cpp:33. The sub-pixel quad above samples u from (ink - fraction) to
+(ink + width + 1 - fraction) texels. Untransformed, every pixel centre lands half a texel inside
+that span and the reads stay within one column of the ink. Under any transform -- a scale, a
+rotation, a fractional translate, a transform transition in flight -- a sample can land anywhere
+in the span, and bilinear reads floor(s - 0.5) and the column after it: two columns past the ink
+on either side, so upstream's one-column gutter let a glyph pick up its neighbour's edge. Upstream's
+own rounded quad never needed more than one. Test: VaCuus.Font.Subpixel.AtlasGutter draws every
+printable ASCII glyph at pen + 0.25 and + 0.75, reads each quad back as atlas texels and fails if
+one quad's reach overlaps another glyph's ink on shared rows. Restore-the-bug, Linux, 2026-10-16:
+one-texel gutter -> Fail, "174 glyph pairs ... '!' at pen + 0.25 can read columns 10-15, and 'V'
+is drawn from 15-25"; two -> Success. Line shifts: TextureLayoutRow.cpp +4 from old :14;
+FontFaceLayer.h +1 from :64 (its comment now names the two-texel gutter).
+
+2. A LINE IS MEASURED ONCE. PR #23 costed a token as W(line + token) - W(line), re-measuring the
+line so far for every token: quadratic in the line, and worst where lines are long -- a single-line
+input is `white-space: pre` (Elements/WidgetTextInput.cpp:164) and re-formats its whole value on
+every keystroke. FontEngineInterface gains GetStringWidthFrom (Include/RmlUi/Core/FontEngineInterface.h
+:91-99): GetStringWidth continued from an unrounded pen. The default engine's GetStringWidth is now
+that one loop started at 0 (FontFaceHandleDefault.cpp:68-72, :74-102), so a line measured token by
+token makes the same float additions in the same order as one call over the line and rounds once;
+the base implementation (FontEngineInterface.cpp:54-60) adds GetStringWidth to the pen, i.e. a
+custom engine gets upstream's per-token sum. GenerateLine keeps upstream's previous_codepoint for
+kerning across a token boundary and carries the pen (ElementText.cpp:254, :259-262, :270-272,
+:311-314, :334). Test: VaCuus.Font.Subpixel.LineMeasuredOnce puts U+4E00, which no loaded face has,
+first on an eleven-token line; patch #5 counts every lookup of it (FontProvider.cpp:54-57), so the
+count is how many times GenerateLine measured that token. Restore-the-bug, Linux, 2026-10-16: PR
+#23's `line + token` -> Fail, "looked the first token's character up 11 times"; the continued pen ->
+Success, 1 lookup, and VaCuus.Font.Subpixel.LineWidth still finds GenerateLine's width equal to the
+line GenerateString draws. Line shifts: ElementText.cpp +11 from old :323 (+1 :253, +4 :257, +2
+:262, +3 :304, +1 :323), and patch #9's citations above moved with it; FontFaceHandleDefault.cpp
++6 from old :74; FontEngineInterface.h +10 from :90. Moved in-repo citations, each compared with the
+line it named before: ElementText.cpp :425-428, :430-439, :443-446, :530-536, :530-539, :371-374,
+:341, :535-536 (+11); FontFaceHandleDefault.cpp :349-352, :378-394, :385-389, :397-404 (+6).
+
+3. AN SBIX FACE KEEPS ITS ADVANCE. Source/Core/FontEngineDefault/FreeTypeInterface.cpp:342-346 takes
+advance_exact from linearHoriAdvance only when FT_IS_SCALABLE(ft_face). FreeType converts that field
+to 16.16 pixels for a scalable face alone (FreeType 2.14.1 src/base/ftobjs.c:1100-1102). An sbix face
+that also has outlines is not scalable (src/sfnt/sfobjs.c:1103-1110) -- Apple's emoji fonts are
+built so -- yet its glyph loader still stores the hmtx advance there (src/truetype/ttgload.c:2412),
+in font units, and PR #23 read 600 of them as 0.009 px: every glyph of such a face drew on top of
+the last. CBDT faces were never affected; their outlines are dropped and the field stays 0. Test:
+VaCuus.Font.Subpixel.SbixAdvance loads VaCuus/Private/Tests/VaCuusSbixFixture.h -- 808 bytes from
+Tools/gen_sbix_fixture.py, one 'A' with a glyf outline and a 32 ppem sbix bitmap, advance 600/1000
+-- and measures "AAAA" at 32 px. Restore-the-bug, Linux, 2026-10-16: the ungated read -> Fail,
+"four A from the sbix face measure 1 px, about 77 expected"; gated -> Success. Line shifts:
+FreeTypeInterface.cpp +2 from old :344.
+
+4. FONTGLYPH'S MEMBER COUNT IS ASSERTED. WeakCopy copies FontGlyph member by member, and a member it
+does not name is silently dropped from every fallback-face glyph -- advance_exact was nearly that
+member. Source/Core/FontEngineDefault/FontFaceHandleDefault.cpp:487-501 asserts the aggregate takes a
+brace list of seven initialisers and not eight, which only a member count can catch: a field
+inserted into existing padding moves neither sizeof nor any offset. It sits in the .cpp and not in
+the public FontGlyph.h, whose WeakCopy comment points at it (:30), so a buyer's module that includes
+RmlUi compiles none of it. Restore-the-bug, 2026-10-16: `int vacuus_probe = 0;` after color_format
+-> "static assertion failed due to requirement '!TakesEight<Rml::FontGlyph>'"; removed -> compiles.
+
+Not changed, and filed instead: the text-input caret still sits at the rounded-up prefix width
+(Elements/WidgetTextInput.cpp:1462-1463), up to a pixel right of the glyph boundary now that glyphs
+sit on a fractional pen. It belongs with the run boundaries the entry above leaves as they are.
+
+Patch #16 -- SVG and Lottie integration (2026-10-20, VaCuus-dgg).
+
+Core enables RMLUI_SVG_PLUGIN and RMLUI_LOTTIE_PLUGIN. Upstream plugin sources
+are retained, with the following integration changes:
+- SVGCache scopes external image resolution to the SVG file (or owning RML for
+  inline SVG), reads through the RmlUi FileInterface, and includes source content
+  in file cache identities. A reload must see fresh bytes while another document
+  still retains the old SVG handle. VaCuus.Vector.SVG covers that case.
+- SVGPlugin registers the shipped LatoLatin font from the VFS for SVG text;
+  LunaSVG system-font scanning is disabled to keep packaged output deterministic.
+- Both plugins refuse raster dimensions above 4096 per axis; Lottie also refuses
+  nonpositive/nonfinite frame rate and duration before time-to-frame conversion.
+  VaCuus.Vector.Limits covers the allocation cap and invalid animation inputs.
+
+VaCuus.Vector.SVG and .Lottie check actual premultiplied RGBA pixels, cache/idle
+behavior, bundle-only nested images, changed animation frames and texture retirement
+through the production recorder. .LottieCost measures changed frames at three sizes,
+not cache hits. .BundlePack covers the added .svg/.json cooked-pack formats.
+
+Patch #17 -- Project individual inline border-box fragments (2026-11-05, VaCuus-v9z4).
+
+ElementUtilities::GetBoundingBox gains an overload taking a box index. It includes
+GetBox(index, offset)'s offset and reuses the existing corner projection and depth-clip
+checks. The original overload still selects the main box, so its callers keep their
+existing behavior. This exposes fragment projection without exporting TransformState.
+
+The vacuus-measure publisher unions all fragments before clipping, projecting each one
+separately: rotating an untransformed union would also measure gaps between fragments.
+VaCuus.Input.MeasuredFragments compares the published bounds with native border-box
+corners under identity, scale(2) and rotate(30deg), including padding and borders.
+
+Patch #18 -- a second finger takes over the primary's touch state.
+
+Found in a mobile game whose HUD is VaCuus: a movement button held by one thumb and an action
+button tapped by the other. Applied 2026-11-05.
+
+Symptom: with one finger already down, a second finger's press replaces the first finger's state.
+The first finger's click is lost, its :active resets, and a drag the first finger started is
+cancelled when the second finger moves. Events from the second finger carry no touch_id, so a
+handler cannot tell the fingers apart.
+
+Cause: Context models one touch point, the primary, as a mouse emulation. ProcessTouchStart treats
+every new identifier as that primary and re-runs hover, :active and the drag decision at its
+position. RmlUi has no notion of several simultaneous touches.
+
+The change (Source/Core/Context.cpp, Include/RmlUi/Core/Context.h):
+- ProcessTouchStart routes a touch whose identifier differs from primary_touch_id to
+  ProcessSecondaryTouchStart. The primary path is unchanged, except that it records
+  primary_touch_id and has_primary_touch; ProcessTouchEnd and ProcessTouchCancel clear
+  has_primary_touch when the primary lifts.
+- ProcessTouchMove, ProcessTouchEnd and ProcessTouchCancel route an identifier found in
+  secondary_touch_states to the matching ProcessSecondaryTouch* function.
+- A secondary finger presses and captures; it does not touch hover, focus or scrolling. Its
+  mousedown goes to the element under the press. Every move dispatches mousemove to that element,
+  however far the finger has travelled. Its mouseup goes to the same element at release. Its click
+  goes there too, when the release is over that element or one of its descendants, and, for a press
+  that would drag, only if the finger has never left the click radius (TOUCH_CLICK_MAX_DISTANCE,
+  3 dp). A press on any other element has no radius: it clicks on a release over it, however far
+  the finger wobbled. The primary differs: its click radius applies only to touches that start in a
+  scroll container.
+- Drag: a secondary finger on an element whose drag is not none dispatches dragstart, drag and
+  dragend once it leaves the click radius (strictly beyond TOUCH_CLICK_MAX_DISTANCE times the
+  density ratio). The dragstart carries the position the finger came from. There is no drag clone.
+  The primary has no drag threshold: its drag starts on the first mouse move that has a drag
+  element.
+- :active for a secondary finger is reference counted per element in secondary_active_counts, over
+  the element and its ancestors, as the primary's hover chain is. A release decrements; the last
+  one clears :active unless the primary's active_chain still holds the element. ResetActiveChain
+  skips elements a secondary finger holds, so the primary's moves cannot strip them.
+- OnElementDetach forgets the element in secondary_active_counts and in every secondary state's
+  pressed_element, drag_element and active_chain, so a later release cannot write through a stale
+  pointer. When it erases the primary's TouchState (the primary's scroll container went away while
+  the primary was down), it clears has_primary_touch as well; otherwise the stale flag routes every
+  later finger to the secondary path until a touch with the stale id arrives.
+- Each secondary dispatch carries touch_id (uint64) beside mouse_x and mouse_y.
+- ProcessTouchStart ends a live secondary whose id starts again, as a cancel, before it routes the
+  start. The old End was lost; without this the start falls through to the primary path with the id
+  in both maps.
+- A cancelled secondary finger never clicks. It ends its drag (dragend) if it was dragging, then
+  sends its pressed element one mouseup (button 0) at its last reported position, then releases
+  :active. The primary's cancel also ends in a mouseup, through ProcessMouseButtonUp.
+- UnloadDocument drops a secondary finger's pressed and drag element when they belong to the
+  document being unloaded. The unloaded elements stay alive until the document is released, so
+  without this the finger would keep dispatching into them. Its :active counts and chains are still
+  cleaned by OnElementDetach.
+
+The shape is deliberately small. It covers a held button plus a second finger that presses or
+drags; it does not reproduce browser multitouch (pinch, gestures, several hovers). Known
+limitation, intentionally not fixed: if a held element is re-parented, its :active stays set; the
+primary behaves the same way.
+
+Line shifts: Context.cpp grows by 396 lines (397 added, 1 replaced), the first 22 after :376;
+Context.h by 47, after :357 and :440. 118 in-repo citations into the two files moved: 110 in 33
+files under Source/, Content/DevUI/ and docs/buyer/, six that continue a citation from the line
+before (a bare `:NNN` with the file named one line up), and two in Tools/gen_rcss_matrix.py, whose
+output regenerates docs/buyer/rcss-matrix.md identical to the edited copy. Each was remapped through
+a line map of master's file against the patched one, so it names the same line text it named on
+master. Dated notes under docs/research, docs/superpowers and docs/passport were left as records.
+
+Test: VaCuus.Input.MultiTouch.* (Source/VaCuusJs/Private/Tests/VaCuusMultiTouchTest.cpp, 17 tests)
+over the fixture Content/DevUI/Tests/multitouch.rml. The fixture's head script exists only so that
+the view's JS context is created: on*-attribute handlers are inert without it. Restore-the-bug,
+Win64, UE 5.8 host editor, -unattended -nullrhi, 2026-11-05:
+  - #18 and #19 absent (Context.cpp and Context.h as on master): 10 of the 17 Fail --
+    TwoButtonsClickIndependently ("each finger clicks the button it pressed": 0,1 against 1,1),
+    HoldAndTap, PrimaryLiftsFirst, ActiveSurvivesPrimaryMove, SecondaryDragCaptured (touch_id
+    undefined), CancelSecondary, CancelWhileDragging, DragEventsSecondary, SecondaryDropTarget and
+    SecondaryCancelOverDropTarget -- and VaCuus.Input.MultiTouchRouting.
+    FirstFingerEndDoesNotCancelSecond ("finger 1's tap on the second button still clicks": 0).
+    The seven that pass are the primary-finger references (DragEventsPrimary,
+    DragDropEventsPrimary, PrimaryCancelOverDropTarget) and four guards against defects found in
+    drafts of this patch (PrimaryRecoversAfterScrollerRemoval, SecondaryIdRestartedAfterPrimaryLift,
+    SecondaryWobblyTapClicks, UnloadDocumentDropsSecondary), which need the secondary path to exist
+    before they can fail;
+  - present: all 17 Success; the whole VaCuus suite 324 of 324.
+
+NOT yet offered upstream. RmlUi has no multitouch to fit it into; offering it means designing that
+API first.
+
+Removal: drop this patch only if RmlUi gains multitouch. Re-run VaCuus.Input.MultiTouch after any
+re-vendor.
+
+Patch #19 -- a secondary finger's drag never reaches a drop target.
+
+Applied 2026-11-05, with #18, for the same HUD: its touch cancel regions are drop targets and must
+see a second finger arrive over them.
+
+Symptom: a secondary finger that drags a drag-drop source gets dragstart, drag and dragend, but
+never dragover, dragout or dragdrop on the element under it. The primary finger gets all of them.
+A cancel region that waits for dragover therefore never sees a secondary finger.
+
+Cause: patch #18 routes a secondary finger to ProcessSecondaryTouch*, which keeps no hover chain
+and so never runs the drop-target code that UpdateHoverChain runs for the primary.
+
+The change (Source/Core/Context.cpp, Include/RmlUi/Core/Context.h):
+- SecondaryTouchState gains drag_hover, drag_hover_chain and drag_verbose, the secondary
+  counterparts of the primary's fields of the same names.
+- drag_verbose is read at the press with the primary's rule: the drag source's style is DragDrop
+  or Clone (IsVerboseDrag, the same test ProcessMouseButtonDown makes). Source style drag, block or
+  none sends no drop-target event, for either finger.
+- UpdateSecondaryDropTarget runs after a secondary finger's dragstart and drag, when it moves. It
+  sends dragout to the elements it left and dragover to the elements it entered, then dragmove to
+  the element under it, as UpdateHoverChain and ProcessMouseMove do.
+- DispatchSecondaryDragEnd runs at the release, and at the cancel in place of the bare dragend. It
+  sends dragdrop and dragout to the element under the finger, then dragend, as ProcessMouseButtonUp
+  does. A cancel therefore gives the same drop the primary's cancel gives, since the primary's
+  cancel also runs ProcessMouseButtonUp.
+- OnElementDetach removes a detached element from drag_hover and drag_hover_chain; a detached
+  source clears both. UnloadDocument clears drag_hover and drag_hover_chain when the target belongs
+  to the document being unloaded.
+- No hover is computed for a secondary finger: it moves no hover, focus or :active. The chain is
+  for drop targets only.
+
+A secondary finger has no ghost clone: the Clone style sends the same drop events, but no ghost is
+drawn under the finger. A handler that removes its target during dragover or dragdrop receives no
+further drop events for it: OnElementDetach keeps the chain free of removed elements.
+
+Test: SecondaryDropTarget and SecondaryCancelOverDropTarget, with DragEventsPrimary,
+DragEventsSecondary, DragDropEventsPrimary and PrimaryCancelOverDropTarget as the primary's
+reference (same file and fixture; #k is the drag-drop source, #zone the target). Restore-the-bug,
+same host and flags, 2026-11-05:
+  - #18 present, #19's drop targets off (the secondary's drag_verbose forced false at the press,
+    which is the behaviour before #19: dragstart, drag and dragend, no drop event): exactly those
+    two Fail -- the zone gets no dragover, dragmove, dragdrop or dragout from the secondary finger
+    -- and the other 15 pass;
+  - present: all 17 Success.
+
+NOT yet offered upstream, for the reason #18 gives.
+
+Removal: with #18. Re-run VaCuus.Input.MultiTouch after any re-vendor.
+
+Patch #20 -- independent mouse/primary touch and a clone for every dragging finger.
+
+Applied 2026-11-05, completing the two limitations recorded with patches #18/#19.
+
+Cause: the primary touch called the public mouse verbs, sharing hover, active/drag,
+click history and one cursor proxy with the physical mouse. A mouse click while a
+finger was held replaced that finger's press. Secondary fingers kept their drag
+state but never created or rendered a proxy.
+
+The change (Source/Core/Context.cpp, Include/RmlUi/Core/Context.h):
+- PointerState groups the physical mouse and primary touch state. Each public device
+  entry selects its state through a scoped guard; private pointer algorithms keep
+  touch scrolling/inertia on their original path. Active/hover styling accounts for
+  both devices, and detach/unload clean both records.
+- Every touch event, including the primary's events, carries touch_id. Mouse events
+  omit it. ProcessMouseCancel retires the physical gesture without clicking; primary
+  touch cancellation now suppresses click as secondary cancellation already did.
+- Clone proxies share one creation/render algorithm and each borrow their source
+  document's stylesheet and source URL, so child images retain relative paths.
+  Every secondary clone has its own proxy and press-relative
+  grab offset; proxies are outside root and cannot enter hit tests or snapshots.
+- End, cancel, source detach and document unload release that finger's proxy. A
+  dragstart handler may remove the source before a clone is created; both pointer
+  paths re-check the source after dispatch.
+
+VaCuus's Slate integration cancels only the revoked pointer. App deactivation and
+view detachment explicitly retire every outstanding touch, including pass-through
+fingers. Teardown releases only this widget's pointer captures, preserving another
+widget's finger for the same Slate user.
+
+Verification is recorded on VaCuus-sixf. Regression coverage includes routed mouse
+clicks during a held finger, both orders on one active element, mouse drag/cancel
+while touching, real-window capture ownership, deactivation, two simultaneous
+secondary clone bounds, source removal/close, removal inside dragstart, and a GPU
+readback of both blue :drag copies plus one-finger cancellation.
+
+This supersedes patch #18's "no drag clone" limit and the shared-primary-button
+limit recorded with PR #26. Pinch/gesture recognition remains application policy.
+
+Independent Linux UE 5.8.1 proof for patch #20: 332/332 VaCuus tests under
+NullRHI and 84/84 render tests with real RHI. Restoring shared pointer state,
+cursor-wide cancellation, user-wide capture release and missing secondary
+proxies makes all eight targeted regressions fail. Removing the dragstart
+source re-check crashes CloneSourceRemovedDuringStart at the cleared drag
+pointer; restored, it passes. Removing the proxy source URL makes
+CloneRelativeImages fail its relative-path assertion; restored, source and
+clone both read back green pixels. SecondaryClonePixels reads both blue
+copies, then only the surviving copy after cancellation.

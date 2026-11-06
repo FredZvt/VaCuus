@@ -1032,8 +1032,10 @@ PropertyIdSet ElementStyle::ComputeValues(Style::ComputedValues& values, const S
 	if (dirty_font_face_handle)
 	{
 		RMLUI_ZoneScopedN("FontFaceHandle");
-		values.font_face_handle(
-			GetFontEngineInterface()->GetFontFaceHandle(values.font_family(), values.font_style(), values.font_weight(), (int)values.font_size()));
+		// VaCuus patch #14 (VENDORED_TAG.txt): rounded, not truncated. A computed size is rarely whole once it comes from
+		// dp, em, rem or a viewport unit, and `(int)` always drew it small -- 10.95px at 10, 13dp at a ratio of 1.5 at 19.
+		values.font_face_handle(GetFontEngineInterface()->GetFontFaceHandle(values.font_family(), values.font_style(), values.font_weight(),
+			Math::RoundToInteger(values.font_size())));
 	}
 
 	// Next, pass inheritable dirty properties onto our children

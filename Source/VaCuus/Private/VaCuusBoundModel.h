@@ -97,7 +97,7 @@ enum class EVaCuusModelDropState : uint8
  *    `data-event-click="Health = 50"` assignment all reach VariableDefinition::Set -- is
  *    REFUSED by FVaCuusScalarDefinition::Set, which returns false and is counted by
  *    VaCuusData::GetNumRefusedSets(). Both RmlUi call sites skip their own DirtyVariable when
- *    Set returns false (DataControllerDefault.cpp:57-59, DataExpression.cpp:1185-1197).
+ *    Set returns false (DataControllerDefault.cpp:57-59, DataExpression.cpp:1186-1198).
  *  - VaCuus code cannot reach the buffer: UIShadow is private and there is NO non-const
  *    accessor for it anywhere in this class. A second writer cannot be added by accident,
  *    only by adding a member function -- which is the point.
@@ -116,7 +116,7 @@ public:
 	 * THE NAME IS AN FString, NOT AN FName, AND THE TYPE IS THE FIX FOR A PACKAGED-ONLY BUG
 	 * (VaCuus-akj.23). RmlUi resolves `data-model` byte-for-byte: Element::SetParent hands the
 	 * attribute's string to Context::GetDataModelPtr (Element.cpp:2212), which is a find() on
-	 * `UnorderedMap<String, ...> data_models` (Context.h:383) -- robin_hood::unordered_flat_map
+	 * `UnorderedMap<String, ...> data_models` (Context.h:406) -- robin_hood::unordered_flat_map
 	 * keyed on std::string (Config.h:83; the vendored build defines no
 	 * RMLUI_NO_THIRDPARTY_CONTAINERS), so 'hud' and 'HUD' are different models. An FName cannot carry
 	 * that identity in a packaged game: WITH_CASE_PRESERVING_NAME follows WITH_EDITORONLY_DATA

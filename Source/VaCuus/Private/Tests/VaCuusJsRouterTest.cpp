@@ -11,6 +11,7 @@
 #include "VaCuusGameBridge.h"
 #include "VaCuusScriptHost.h"
 #include "VaCuusTestDocumentHost.h"
+#include "VaCuusTestLogCapture.h"
 #include "VaCuusUIThread.h"
 #include "VaCuusView.h"
 #include "VaCuusViewStatus.h"
@@ -423,6 +424,13 @@ bool FVaCuusRouterWriteTest::RunTest(const FString& /*Parameters*/)
 		Host.ClickRow(0);
 	};
 
+	// THE ROUTED WRITE IS NOT A FAILURE, AND MUST NOT LOG LIKE ONE (bead VaCuus-w87.1). The
+	// row click is an Assign instruction, and FVaCuusScalarDefinition::Set returns false for a
+	// routed write on purpose (I3: no DirtyVariable); RmlUi read that false as a failed
+	// assignment and logged "Could not assign to variable." plus a program dump on EVERY
+	// correct click. Captured from before the load so the whole session is covered.
+	FVaCuusTestLogCapture LogCapture;
+
 	const uint32 ViewId = UIThread->AllocateViewId();
 	UIThread->EnqueueAddView(ViewId, MoveTemp(OwnedHost), FIntPoint(400, 300), Status);
 	UIThread->EnqueueBindModel(ViewId, Model);
@@ -517,6 +525,13 @@ bool FVaCuusRouterWriteTest::RunTest(const FString& /*Parameters*/)
 			Listener->Writes[1].Value.Kind == EVaCuusJsValueKind::String
 				&& Listener->Writes[1].Value.String == TEXT("hacked"));
 	}
+
+	// Four routed writes (two clicks per click phase, one of them an Assign each time), zero
+	// RmlUi failure lines. Remove the delivered-assignment mark from the routed branch of
+	// FVaCuusScalarDefinition::Set and both counts read 2.
+	TestEqual(TEXT("no routed Assign was reported as 'Could not assign to variable'"),
+		LogCapture.Count(TEXT("Could not assign to variable")), 0);
+	TestEqual(TEXT("and no program dump followed one"), LogCapture.Count(TEXT("Failed to execute program")), 0);
 
 	GameView->Invalidate();
 	UIThread->EnqueueRemoveView(ViewId);

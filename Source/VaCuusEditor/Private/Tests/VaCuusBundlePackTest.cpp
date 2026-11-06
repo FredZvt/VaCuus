@@ -84,6 +84,94 @@ struct FFixtureTree
 };
 }	 // namespace VaCuusBundlePackTest
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusVectorBundlePackTest, "VaCuus.Vector.BundlePack",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FVaCuusVectorBundlePackTest::RunTest(const FString& Parameters)
+{
+	VaCuusBundlePackTest::FFixtureTree Tree(TEXT("vector_resources"));
+	if (!TestTrue(TEXT("vector fixtures written"), Tree.Write(TEXT("icon.svg"), TEXT("<svg/>")) &&
+		Tree.Write(TEXT("animation.json"), TEXT("{}")) && Tree.Write(TEXT("ignored.txt"), TEXT("unused")))) return false;
+	const auto Files = VaCuusBundlePack::EnumerateTree({Tree.Root});
+	TestEqual(TEXT("both SVG and Lottie JSON reach the cooked pack"), Files.Num(), 2);
+	TestTrue(TEXT("SVG included"), Files.ContainsByPredicate([](const auto& File) { return File.NormalizedPath == TEXT("icon.svg"); }));
+	TestTrue(TEXT("Lottie JSON included"), Files.ContainsByPredicate([](const auto& File) { return File.NormalizedPath == TEXT("animation.json"); }));
+	return true;
+}
+
+/**
+ * THE PLUGIN'S DEMOS STAY OUT OF A PROJECT'S BUNDLE (bead VaCuus-w87.14, owner decision
+ * 2026-10-06). A field report's ten-file UI cooked into a 41-file bundle: the walk took every
+ * document under VaCuus's own Content/DevUI -- demos, their scripts and two hundred demo images
+ * -- into every Shipping build. The VaCuus root now contributes only what a buyer's documents
+ * can depend on, stylesheets (vacuus-base.rcss) and fonts (the default face Shipping loads from
+ * the bundle); every other root, other plugins' included, is unchanged.
+ *
+ * An excluded plugin file does not CLAIM its path either: a project document that shares a
+ * path with a plugin demo used to be shadowed by it, and is what ships now.
+ *
+ * RESTORE-THE-BUG: ignore AssetOnlyRoot in EnumerateTree and the restricted walk returns all
+ * seven files with the plugin's shared.rml winning.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusBundlePluginDemosTest, "VaCuus.Bundle.PluginDemosExcluded",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVaCuusBundlePluginDemosTest::RunTest(const FString& Parameters)
+{
+	using namespace VaCuusBundlePackTest;
+
+	FFixtureTree Plugin(TEXT("plugin_root"));
+	FFixtureTree Project(TEXT("project_root"));
+	if (!TestTrue(TEXT("Fixtures written"),
+			Plugin.Write(TEXT("Base/vacuus-base.rcss"), TEXT("body { display: block; }")) &&
+			Plugin.Write(TEXT("fonts/Face.ttf"), TEXT("not really a font")) &&
+			Plugin.Write(TEXT("demo.rml"), TEXT("<rml>demo</rml>")) &&
+			Plugin.Write(TEXT("demo.js"), TEXT("let demo = 1;")) &&
+			Plugin.Write(TEXT("img/demo.png"), TEXT("not really a png")) &&
+			Plugin.Write(TEXT("shared.rml"), TEXT("PLUGIN DEMO")) &&
+			Project.Write(TEXT("shared.rml"), TEXT("PROJECT DOCUMENT")) &&
+			Project.Write(TEXT("mine.rml"), TEXT("<rml>mine</rml>"))))
+	{
+		return false;
+	}
+
+	auto Paths = [](const TArray<VaCuusBundlePack::FSourceFile>& Files)
+	{
+		TArray<FString> Out;
+		for (const VaCuusBundlePack::FSourceFile& File : Files)
+		{
+			Out.Add(File.NormalizedPath);
+		}
+		Out.Sort();
+		return Out;
+	};
+
+	// Control: no restriction, the historical walk.
+	const TArray<VaCuusBundlePack::FSourceFile> Everything = VaCuusBundlePack::EnumerateTree({Plugin.Root, Project.Root});
+	TestEqual(TEXT("unrestricted, both roots contribute everything (shared.rml once)"), Everything.Num(), 7);
+
+	int32 NumShadowed = 0;
+	int32 NumTestsExcluded = 0;
+	int32 NumDemosExcluded = 0;
+	const TArray<VaCuusBundlePack::FSourceFile> Shipped = VaCuusBundlePack::EnumerateTree(
+		{Plugin.Root, Project.Root}, &NumShadowed, &NumTestsExcluded, Plugin.Root, &NumDemosExcluded);
+
+	const TArray<FString> Expected = {TEXT("base/vacuus-base.rcss"), TEXT("fonts/face.ttf"), TEXT("mine.rml"), TEXT("shared.rml")};
+	TestTrue(FString::Printf(TEXT("the plugin root gives only its stylesheet and font; got [%s]"),
+				 *FString::Join(Paths(Shipped), TEXT(", "))),
+		Paths(Shipped) == Expected);
+	TestEqual(TEXT("four plugin files were left out as demos (rml, js, png, and the shared rml)"), NumDemosExcluded, 4);
+	TestEqual(TEXT("and nothing was shadowed: an excluded file claims no path"), NumShadowed, 0);
+
+	const VaCuusBundlePack::FSourceFile* Shared = Shipped.FindByPredicate(
+		[](const VaCuusBundlePack::FSourceFile& File) { return File.NormalizedPath == TEXT("shared.rml"); });
+	if (TestNotNull(TEXT("shared.rml is packed"), Shared))
+	{
+		TestTrue(TEXT("from the PROJECT, now that the plugin's demo copy is out"), Shared->DiskPath.StartsWith(Project.Root));
+	}
+
+	return true;
+}
+
 /**
  * The determinism double-pack (spec M6 2(c)): the identical tree packed from
  * differently-ordered inputs must produce BYTE-IDENTICAL payload and index hash --

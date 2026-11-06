@@ -883,6 +883,61 @@ struct FVaCuusReservedNameModel
 	FString Title;
 };
 
+/**
+ * EVERY MEMBER A PLAIN UPROPERTY() -- exposed to neither Blueprint nor the details panel, the
+ * shape the field report's first model had (bead VaCuus-w87.3). Nothing binds, and the one
+ * Warning a reader sees at default verbosity must say WHICH members were skipped and why;
+ * the per-member lines are Verbose by design (a struct with SOME unexposed members is normal).
+ */
+USTRUCT()
+struct FVaCuusLayoutTestUnexposedModel
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Countdown = 0;
+
+	UPROPERTY()
+	bool bReady = false;
+};
+
+/**
+ * A ROW TYPE WITH A CONTAINER MEMBER, worn as an array element (bead VaCuus-w87.4): the
+ * field report's chest card with its own list of trait lines. Since the owner decision of
+ * 2026-10-06 the container member is refused ALONE and the rest of the row binds -- before
+ * it, the whole Rows array was refused and the card row rendered empty under a "1 of 1"
+ * bind summary. Reuses FVaCuusTestNestedArrayRow (Inner + Kept) so the same row type is
+ * also a valid ROOT, where Inner binds as an ordinary top-level array.
+ */
+USTRUCT()
+struct FVaCuusNestedRowModel
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Test")
+	TArray<FVaCuusTestNestedArrayRow> Rows;
+};
+
+/**
+ * One string per probe the load-time diagnostics need (beads VaCuus-w87.5 and .8): a value to
+ * bind into a style property (empty on purpose -- a default-constructed colour field), a
+ * second string, and a list to alias over.
+ */
+USTRUCT()
+struct FVaCuusBindDiagnosticsModel
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Test")
+	FString Colour;
+
+	UPROPERTY(EditAnywhere, Category = "Test")
+	FString Label;
+
+	UPROPERTY(EditAnywhere, Category = "Test")
+	TArray<FString> Lines;
+};
+
 /*
  * THERE IS NO NATIVE CONTAINER-CYCLE FIXTURE, AND THAT IS UHT'S DOING, NOT A GAP. The
  * direct shape (TArray<FSelf> inside FSelf) is refused outright

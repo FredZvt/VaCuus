@@ -31,7 +31,7 @@
  * and SetVisible are deliberately NOT provided -- they stay pure from the interface, because
  * RecordAndPublishFrame IS the measurement in every one of these tests and SetVisible is a
  * genuine three-way split (no-op / Show-Hide) that only one test drives at all
- * (VaCuusSnapshotTest.cpp:478 is the sole EnqueueSetVisible in the suite).
+ * (VaCuusSnapshotTest.cpp:400 is the sole EnqueueSetVisible in the suite).
  *
  * THREAD HAND-OFF, the rule every derived probe inherits: observations are plain members
  * written on the UI thread and read on the test thread with no lock and no atomic. That is
@@ -78,7 +78,7 @@ public:
 		ContextName = FString::Printf(TEXT("%s_%u"), *ContextPrefix, InViewId);
 
 		// 1x1 rather than the view's real size: AddView applies that immediately afterwards
-		// through SetViewSize (VaCuusUIThread.cpp:1492-1494), and a probe that is never given a
+		// through SetViewSize (VaCuusUIThread.cpp:1559-1561), and a probe that is never given a
 		// positive size must NOT look laid out. A null render interface is the normal case --
 		// FVaCuusEngine installs one globally when nobody supplied a real one, and
 		// Rml::CreateContext falls back to it; CreateRenderInterface() is the hook for the two
@@ -114,11 +114,11 @@ public:
 		check(FVaCuusUIThread::IsInUIThread());
 
 		// The interface promises idempotence (VaCuusDocumentHost.h:68). RmlUi already guards the
-		// dimension write itself (Context.cpp:131), so the clause that earns its keep here is the
+		// dimension write itself (Context.cpp:128), so the clause that earns its keep here is the
 		// non-positive one: it keeps ViewSize -- which HasView() reads -- from ever holding a
 		// degenerate size. Every probe in this suite receives exactly one SetViewSize call, from
 		// AddView, which filters non-positive sizes before it calls at all
-		// (VaCuusUIThread.cpp:1492-1494); the only EnqueueResize in the corpus drives the
+		// (VaCuusUIThread.cpp:1559-1561); the only EnqueueResize in the corpus drives the
 		// production host, not a probe (VaCuusUnsizedDrainTest.cpp:225).
 		if (InViewSize == ViewSize || InViewSize.X <= 0 || InViewSize.Y <= 0)
 		{

@@ -276,6 +276,23 @@ struct FVaCuusTextFieldState
 };
 
 /**
+ * One element's laid-out border box, published because the element carries
+ * `vacuus-measure="<integer>"`. See FVaCuusInteractiveSnapshot::MeasuredRects.
+ *
+ * AN INTEGER KEY, NOT THE ATTRIBUTE STRING: the publisher rotates through three snapshots
+ * forever and a steady-state frame must not allocate (see Reset()); an FString per entry
+ * would allocate every frame. A data binding writes the key as easily as a string --
+ * `data-attr-vacuus-measure="row.MeasureId"`.
+ */
+struct FVaCuusMeasuredRect
+{
+	int32 Key = 0;
+
+	/** View-space pixels, snapped outwards, half-open, NOT clipped. */
+	FIntRect Rect;
+};
+
+/**
  * Where a view is interactive, as a fully detached value type.
  *
  * WHY IT EXISTS: Slate demands a synchronous verdict. `OnMouseButtonDown` has to
@@ -283,7 +300,7 @@ struct FVaCuusTextFieldState
  * through to the game. The authoritative hit test
  * (`Rml::Context::GetElementAtPoint`) lives on the UI thread and may not be called
  * from the game thread at all -- it rebuilds RmlUi's private stacking-context
- * cache despite being declared const (Context.cpp:1407). So the UI thread
+ * cache despite being declared const (Context.cpp:1892). So the UI thread
  * publishes this instead: the rectangles it *would* have hit, as plain integers,
  * once per frame, and the game thread answers from them.
  *
@@ -321,13 +338,19 @@ struct FVaCuusTextFieldState
  *     computed `pointer-events` != none
  *     AND ( computed `tab-index` == auto
  *        OR its tag is one of button|input|select|textarea|a
- *        OR it carries the plain attribute `vacuus-interactive` )
+ *        OR it carries the plain attribute `vacuus-interactive`
+ *        OR it carries a press handler in the markup: `data-event-<press>` or
+ *           `on<press>`, where <press> is click, dblclick, mousedown, mouseup,
+ *           mousescroll, dragstart, drag or dragend )
  *
  * WHY A HEURISTIC AT ALL: what actually makes an element interactive in RmlUi is
  * an attached event listener, and RmlUi exposes no way to ask ("does this element
  * have a click listener?" has no public API at 0ae381e). tab-index/tag/attribute
- * are the observable proxies. `vacuus-interactive` is the escape hatch for
- * anything the proxies miss -- a plain <div> wired up from script, most obviously.
+ * are the observable proxies. A handler WRITTEN IN THE MARKUP is the one listener
+ * that is observable, as an attribute (bead VaCuus-w87.2; IsPressHandlerAttribute in
+ * the .cpp says why hover handlers are left out). `vacuus-interactive` is the escape
+ * hatch for anything the proxies still miss -- a plain <div> given a listener from
+ * script with addEventListener, most obviously.
  *
  * The known-interactive tag list includes RmlUi's three non-DOM scrollbar tags
  * (`scrollbarvertical`, `scrollbarhorizontal`, `scrollbarcorner` -- the names
@@ -347,7 +370,7 @@ struct FVaCuusTextFieldState
  * so. A CLICK focuses far more than this: Context::ProcessMouseButtonDown resolves
  * its target through FindFocusElement, which walks up from the hovered element to
  * the nearest ancestor-or-self whose computed `focus` != none and does not look at
- * tab-index at all (Context.cpp:607-619, :631-641), and Element::Focus() then
+ * tab-index at all (Context.cpp:682-694, :706-716), and Element::Focus() then
  * accepts on the same one test (Element.cpp:1179-1184). So a click on a plain
  * <div> does take RmlUi focus. Reporting THAT would be useless to the only
  * consumer: SVaCuusWidget takes SLATE keyboard focus from this flag, and taking the
@@ -384,6 +407,41 @@ struct FVaCuusInteractiveSnapshot
 	 * one DFS in BuildVaCuusInteractiveSnapshot.
 	 */
 	TArray<EVaCuusRectFlags> RectFlags;
+
+	/**
+	 * Laid-out border boxes of the elements that ask to be measured, keyed by the integer
+	 * value of their `vacuus-measure` attribute. Order is meaningless; a key the author
+	 * reused appears once per element that carries it.
+	 *
+	 * WHAT IT IS FOR: game code that positions document content itself -- world-anchored
+	 * labels, say, that must not overlap -- needs the size every such box came out at after
+	 * text wrap, on every frame. The game thread cannot ask RmlUi (every read is
+	 * UI-thread-only, see BuildVaCuusInteractiveSnapshot), and the JS DOM has no
+	 * offsetWidth/getBoundingClientRect (GElementProtoEntries in VaCuusJsDom.cpp).
+	 * UVaCuusView::QueryElementBounds does answer, but one element per query, looked up
+	 * by id across every document (VaCuusUIThread.cpp:785-789) and answered after the next
+	 * UI frame into a query the asker allocates and polls (FVaCuusElementBoundsQuery) --
+	 * the right shape for aiming one click, and N allocations, searches and polls a frame
+	 * for N labels. The walk that builds this snapshot already reads every visited
+	 * element's box after Context::Update(), so publishing the marked ones costs a compare
+	 * per attribute and, in steady state, no allocation.
+	 *
+	 * UNCLIPPED, unlike InteractiveRects: this is the box's own size and position, not the
+	 * part of it a click could reach, so a box half off-screen still reports its full size.
+	 * An inline element split across lines includes every border-box fragment. Under a
+	 * `transform` it is the axis-aligned union of the individually projected fragments.
+	 *
+	 * WHAT IS NOT MEASURED: an element the walk never visits -- invisible (display:none or
+	 * visibility:hidden, the IsVisible() prune), inside a `vacuus-passthrough` subtree, or
+	 * under an ancestor whose clip is empty -- and a value with no leading integer (it is
+	 * read with `sscanf("%d")`, so "7px" still measures as 7).
+	 * The first is the useful answer (there is nothing to place), the second is the walk's
+	 * pointer-coverage prune and not a statement about layout.
+	 *
+	 * STALE BY ONE UI FRAME, like everything else here, and keyed so the consumer can tell:
+	 * bump the key whenever the content changes and ignore entries under the old one.
+	 */
+	TArray<FVaCuusMeasuredRect> MeasuredRects;
 
 	/**
 	 * Cursor shape the UI wants, for SVaCuusWidget::OnCursorQuery. RmlUi pushes
@@ -430,7 +488,7 @@ struct FVaCuusInteractiveSnapshot
 	 * EXACTLY RmlUi's OWN PRECONDITIONS, both of them:
 	 *
 	 *  1. A DOCUMENT ELEMENT holds focus. Context::ProcessKeyDown dispatches to `focus`,
-	 *     or to the context ROOT when there is none (Context.cpp:534-537); the root is not
+	 *     or to the context ROOT when there is none (Context.cpp:562-565); the root is not
 	 *     an ElementDocument, so ElementDocument::ProcessDefaultAction -- where every Tab,
 	 *     arrow and Return handler lives -- never runs and no key can move focus at all.
 	 *  2. FindNextTabElement has somewhere to land (ElementDocument.cpp:583 calls it from
@@ -580,8 +638,22 @@ struct FVaCuusInteractiveSnapshot
 		return EnumHasAnyFlags(DirectionsEnteringFocus, Direction);
 	}
 
+	/** The first measured box under this key, or nullptr when none was laid out last frame. Linear scan. */
+	const FIntRect* FindMeasuredRect(int32 Key) const
+	{
+		for (const FVaCuusMeasuredRect& Measured : MeasuredRects)
+		{
+			if (Measured.Key == Key)
+			{
+				return &Measured.Rect;
+			}
+		}
+
+		return nullptr;
+	}
+
 	/**
-	 * Back to "nothing is interactive", keeping both arrays' allocations. The
+	 * Back to "nothing is interactive", keeping the arrays' allocations. The
 	 * publisher rotates through three of these forever, so reusing the arrays is
 	 * what makes a steady-state UI frame allocation-free.
 	 */
@@ -591,6 +663,7 @@ struct FVaCuusInteractiveSnapshot
 		ViewSize = FIntPoint::ZeroValue;
 		InteractiveRects.Reset();
 		RectFlags.Reset();
+		MeasuredRects.Reset();
 		Cursor = EMouseCursor::Default;
 		bWantsKeyboardFocus = false;
 		bTabEntersFocus = false;
@@ -651,7 +724,7 @@ VACUUS_API FVaCuusSnapshotBuildStats BuildVaCuusInteractiveSnapshot(
  *
  * The source of FVaCuusInteractiveSnapshot::Cursor, and it has to be a latch:
  * RmlUi pushes the cursor name through SystemInterface::SetMouseCursor from inside
- * Context::Update, only when the name changed (Context.cpp:1315-1327), and offers
+ * Context::Update, only when the name changed (Context.cpp:1785-1797), and offers
  * nothing to query. There is one system interface for the whole process but a
  * cursor per context, so a host must sample this IMMEDIATELY after its own
  * Update() and adopt the value only when the serial moved -- that is what

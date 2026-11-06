@@ -122,7 +122,7 @@ body
 .m3-btn:focus  { border: 1px #7FE3FF; }
 
 /* Section 5 rows. The template div itself never shows (DataViewFor::Initialize hides it,
-   DataViewDefault.cpp:474); these style the generated clones, which carry the template's
+   DataViewDefault.cpp:479); these style the generated clones, which carry the template's
    class list. Killer bright, victim white, weapon muted: the row has to read as
    "who > whom, with what" at screenshot size. */
 .kill-row { height: 22px; }
@@ -135,7 +135,7 @@ body
 .weapon   { color: #74909C; font-size: 13px; margin-left: 8px; }
 
 /* The HS pill. data-if toggles a LOCAL display:none against this rule's display
-   (DataViewDefault.cpp:224-245), so inline-block here is the "true" state. Bordered and
+   (DataViewDefault.cpp:229-250), so inline-block here is the "true" state. Bordered and
    recolored for the m1_hud reason the alert class gives: a marker that never appears must
    not be confusable with one whose styling is merely subtle. */
 .hs

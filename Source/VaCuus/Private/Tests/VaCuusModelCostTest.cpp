@@ -48,7 +48,7 @@
  *               RmlUi ships a bound double through "%.3f" plus TrimTrailingDotZeros
  *               (TypeConverter.inl:282-295), so 0.0001 and 0.0002 are both the string "0";
  *               DataViewText::Update then evaluates the expression and skips SetText because
- *               `entry.value != value` is false (DataViewDefault.cpp:354). Every expression runs
+ *               `entry.value != value` is false (DataViewDefault.cpp:359). Every expression runs
  *               and the DOM never moves. REDRAWN - STILL is therefore the PURE re-evaluation
  *               cost, which is exactly what spec 9's third row names -- and exactly the
  *               experiment the spec's own note describes, where dirtying everything every frame
@@ -179,7 +179,7 @@ private:
  * ONE ELEMENT PER VARIABLE, NOT ONE ELEMENT LISTING ALL OF THEM, and the difference is the
  * shape of the cost being measured. A single element's DataViewText holds every `{{...}}` in its
  * text as separate entries and re-runs ALL of them whenever ANY of its variables is dirtied
- * (DataViewDefault.cpp:348-359), so N variables in one element would measure N^2-ish work that
+ * (DataViewDefault.cpp:353-364), so N variables in one element would measure N^2-ish work that
  * no real document does. Separate elements give RmlUi's name_view_map one view per name
  * (DataView.cpp:82-83), which is the O(views under every dirtied name) the spec budgets.
  *
@@ -591,7 +591,7 @@ static constexpr int32 ProbeRow = 137;
 /**
  * The Task 5 killfeed document without the size probe: one data-for, four `{{...}}`
  * entries per row in ONE text node -- so each row owns one DataViewText with four entries,
- * all four re-run whenever the root is dirtied (DataViewDefault.cpp:348-359). 200 rows
+ * all four re-run whenever the root is dirtied (DataViewDefault.cpp:353-364). 200 rows
  * therefore cost ~800 expression evaluations per dirty, which is the "~4 bindings/row"
  * basis spec 9's re-evaluation row is priced in.
  *
@@ -724,8 +724,8 @@ private:
 		}
 
 		// Generated rows are every child WITHOUT data-for, in row order -- the template
-		// keeps its attribute and rows are inserted before it (DataViewDefault.cpp:486-491,
-		// :522-523; the FDataForProbeHost capture states the argument in full).
+		// keeps its attribute and rows are inserted before it (DataViewDefault.cpp:491-496,
+		// :534-535; the FDataForProbeHost capture states the argument in full).
 		const int NumChildren = Container->GetNumChildren();
 		int32 RowIndex = 0;
 		for (int Index = 0; Index < NumChildren; ++Index)
@@ -764,9 +764,9 @@ private:
 /**
  * How many FrameLog records the test thread may read; every test-thread index must stay
  * below it, and FrameLog.Num()/Last() are never trusted. WaitForFrameCount alone is not
- * enough: every Enqueue* ends in Trigger() (VaCuusUIThread.cpp:549-555), the wake event is a
- * binary AutoReset latch (VaCuusUIThread.h:473-474), and FrameCount increments only AFTER
- * RunFrame returns (VaCuusUIThread.cpp:963-964) -- so a trigger landing mid-frame leaves
+ * enough: every Enqueue* ends in Trigger() (VaCuusUIThread.cpp:553-559), the wake event is a
+ * binary AutoReset latch (VaCuusUIThread.h:507-508), and FrameCount increments only AFTER
+ * RunFrame returns (VaCuusUIThread.cpp:1019-1020) -- so a trigger landing mid-frame leaves
  * the event set and the worker runs one more frame concurrent with test-thread code, whose
  * AddDefaulted_GetRef bumps ArrayNum before the record's FStrings are constructed.
  * FramesRecorded is incremented with release AFTER the record is completely filled, exactly
@@ -1054,7 +1054,7 @@ bool FVaCuusModelArrayUICostTest::RunTest(const FString& Parameters)
 /**
  * SPEC 9's TWO SINGLE-FRAME ROWS (plan 6.4 c+d): grow 0->200 -- 200 SetInnerRML row parses
  * in one Update (DataViewFor::Update creates every missing row inline,
- * DataViewDefault.cpp:509-527), a load spike by design -- and shrink 200->0, whose view
+ * DataViewDefault.cpp:521-539), a load spike by design -- and shrink 200->0, whose view
  * cleanup RmlUi itself flags `@performance: Horrible` (DataView.cpp:117-132): quadratic in
  * rows, the reason spec 3.6 documents "don't clear per frame". Measured, no target, no
  * tripwire: these are numbers for the spec table and the demo's design margins, not

@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitepress'
 import { METRIKA_ID } from './analytics.js'
 
+// package.json overrides Vite to 6.4.4: stable VitePress 1.6.4 pins the
+// vulnerable Vite 5 branch. Its Vue plugin supports Vite 6; retain this pin
+// until VitePress ships a compatible stable dependency update.
+
 // Site root is site/, so index.md -> /, ai.md -> /ai, license.md -> /license,
 // docs/*.md -> /docs/*.
 // docs/*.md are copies synced from the repo's docs/buyer/ by scripts/sync-docs.mjs
@@ -142,7 +146,8 @@ export default defineConfig({
             { text: 'RCSS Matrix', link: '/docs/rcss-matrix' },
             { text: 'Performance Guide', link: '/docs/perf-guide' },
             { text: 'AI Guide', link: '/docs/ai-guide' },
-            { text: 'Localization', link: '/docs/localization' }
+            { text: 'Localization', link: '/docs/localization' },
+            { text: 'SVG and Lottie', link: '/docs/vector-assets' }
           ]
         }
       ]

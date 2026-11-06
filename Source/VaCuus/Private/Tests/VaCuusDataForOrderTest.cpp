@@ -18,7 +18,7 @@
  * (DataModel::GetVariableInto, DataModel.cpp:316-323), and the model walks `Rows[i]` into this definition's
  * Child (DataModel.cpp:285-290). A view that runs for a row the shrink has already cut off is therefore exactly
  * one Child call past the end, and nothing else in the rig calls Child: DataViewFor::Update asks the container for
- * its Size only (DataViewDefault.cpp:526-531). RmlUi's "Could not get value from data variable" warning
+ * its Size only (DataViewDefault.cpp:538-543). RmlUi's "Could not get value from data variable" warning
  * (DataModel.cpp:321) marks the same event, but a warning does not fail an automation test, and its wording belongs
  * to the vendored SHA.
  *
@@ -89,8 +89,8 @@ private:
 	Rml::ScalarDefinition<int32> RowDefinition;
 };
 
-/** The generated rows, in order. The template keeps its `data-for` and the rows do not (DataViewDefault.cpp:514-519),
- *  and the rows are inserted before it (:551), so every child of #rows without the attribute is a row. */
+/** The generated rows, in order. The template keeps its `data-for` and the rows do not (DataViewDefault.cpp:526-531),
+ *  and the rows are inserted before it (:563), so every child of #rows without the attribute is a row. */
 static TArray<Rml::Element*> GetRows(Rml::ElementDocument& Document)
 {
 	TArray<Rml::Element*> Rows;

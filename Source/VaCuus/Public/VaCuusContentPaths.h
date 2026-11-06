@@ -121,6 +121,13 @@ namespace VaCuusContentPaths
 VACUUS_API const TArray<FString>& GetDocumentRoots();
 
 /**
+ * VaCuus's OWN DevUI root, spelled exactly as it appears in GetDocumentRoots() (the same
+ * content-dir-to-root join), or empty when the plugin descriptor cannot be found. Not
+ * GetDocumentRoots()[0]: without the descriptor, entry 0 is somebody else's root.
+ */
+VACUUS_API const FString& GetVaCuusDocumentRoot();
+
+/**
  * The ORDER RULE as a pure function: each content directory gets `/DevUI` appended, is
  * made absolute, and is appended unless an equal root is already present. OtherPluginContentDirs
  * is consumed in the order given -- the caller owns the plugin-name sort, because the

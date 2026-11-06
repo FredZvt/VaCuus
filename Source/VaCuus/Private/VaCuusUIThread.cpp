@@ -141,7 +141,7 @@ struct FVaCuusInlineUIThreadScope
  * "the event was NOT consumed" (false means an element called StopPropagation),
  * while ProcessMouseMove/ButtonDown/ButtonUp/MouseLeave return
  * `!IsMouseInteracting()` -- a hover/active STATE hint evaluated after dispatch,
- * not consumption (Context.cpp:849). Collapsing the two into a single "handled"
+ * not consumption (Context.cpp:924). Collapsing the two into a single "handled"
  * bit is how embedders get this wrong. There is also nowhere for the answer to go:
  * Slate was answered synchronously on the game thread from the published snapshot,
  * frames ago in queue terms, and it cannot be un-answered now.
@@ -175,7 +175,7 @@ void DispatchInputEvent(Rml::Context& Context, const FVaCuusInputEvent& Event)
 			// appeared under the cursor, a window that just took focus, or a
 			// synthesized event. Redundant when a move did precede it, and cheap:
 			// ProcessMouseMove guards its mousemove dispatch on the position actually
-			// having changed (Context.cpp:586-601), so this costs one hit test and
+			// having changed (Context.cpp:661-676), so this costs one hit test and
 			// emits no spurious events.
 			Context.ProcessMouseMove(Event.Position.X, Event.Position.Y, Modifiers);
 
@@ -211,9 +211,13 @@ void DispatchInputEvent(Rml::Context& Context, const FVaCuusInputEvent& Event)
 			Context.ProcessMouseWheel(Rml::Vector2f(0.0f, -Event.WheelDelta), Modifiers);
 			break;
 
+		case EVaCuusInputEventKind::MouseCancel:
+			Context.ProcessMouseCancel();
+			break;
+
 		case EVaCuusInputEventKind::MouseLeave:
 			// Not optional: without it `mouse_active` stays set, the hover chain is never
-			// cleared and `:hover` styling sticks forever (Context.cpp:839-846). The next
+			// cleared and `:hover` styling sticks forever (Context.cpp:914-921). The next
 			// ProcessMouseMove re-arms the context.
 			Context.ProcessMouseLeave();
 			break;
@@ -224,9 +228,9 @@ void DispatchInputEvent(Rml::Context& Context, const FVaCuusInputEvent& Event)
 		case EVaCuusInputEventKind::TouchCancel:
 		{
 			// A ONE-ELEMENT LIST, and not because we only ever have one finger: the
-			// singular overloads are PRIVATE (Context.h:432-439; the public API is the
-			// TouchList quartet at :209-230), and the plural ones are a bare loop over them
-			// (Context.cpp:860-890). So batching N fingers into one call and making N calls
+			// singular overloads are PRIVATE (Context.h:466-473; the public API is the
+			// TouchList quartet at :211-232), and the plural ones are a bare loop over them
+			// (Context.cpp:935-969). So batching N fingers into one call and making N calls
 			// are the same thing to RmlUi, and one event per finger is what the queue
 			// already carries.
 			const Rml::TouchList Touches{Rml::Touch{static_cast<Rml::TouchId>(Event.TouchId),
@@ -248,7 +252,7 @@ void DispatchInputEvent(Rml::Context& Context, const FVaCuusInputEvent& Event)
 					Context.ProcessTouchEnd(Touches, Modifiers);
 					break;
 				default:
-					// ProcessTouchCancel takes no modifier state at all (Context.h:230): a
+					// ProcessTouchCancel takes no modifier state at all (Context.h:232): a
 					// cancelled gesture has no key semantics to report.
 					Context.ProcessTouchCancel(Touches);
 					break;
@@ -271,7 +275,7 @@ void DispatchInputEvent(Rml::Context& Context, const FVaCuusInputEvent& Event)
 			// RmlUi does NOT synthesise a newline text-input from Return, so multiline
 			// controls stay empty unless the embedder sends one -- exactly what the SDL
 			// backend does (RmlUi_Platform_SDL.cpp:207-210). The `char` overload is safe
-			// here and only here: it silently drops any byte above 127 (Context.cpp:553-557)
+			// here and only here: it silently drops any byte above 127 (Context.cpp:581-585)
 			// and '\n' is 10.
 			if (KeyId == Rml::Input::KI_RETURN || KeyId == Rml::Input::KI_NUMPADENTER)
 			{
@@ -686,12 +690,13 @@ void FVaCuusUIThread::EnqueueCloseDocument(uint32 ViewId)
 	Enqueue(MoveTemp(Command));
 }
 
-void FVaCuusUIThread::EnqueueResize(uint32 ViewId, FIntPoint ViewSize)
+void FVaCuusUIThread::EnqueueResize(uint32 ViewId, FIntPoint ViewSize, float DpRatio)
 {
 	FVaCuusUICommand Command;
 	Command.Kind = EVaCuusCommandKind::Resize;
 	Command.ViewId = ViewId;
 	Command.ViewSize = ViewSize;
+	Command.DpRatio = DpRatio;
 	Enqueue(MoveTemp(Command));
 }
 
@@ -752,6 +757,58 @@ void FVaCuusUIThread::EnqueueDumpNodeCount(uint32 ViewId)
 	Command.Kind = EVaCuusCommandKind::DumpNodeCount;
 	Command.ViewId = ViewId;
 	Enqueue(MoveTemp(Command));
+}
+
+void FVaCuusUIThread::EnqueueQueryElementBounds(uint32 ViewId, const TSharedRef<FVaCuusElementBoundsQuery>& Query)
+{
+	FVaCuusUICommand Command;
+	Command.Kind = EVaCuusCommandKind::QueryElementBounds;
+	Command.ViewId = ViewId;
+	Command.BoundsQuery = Query;
+	Enqueue(MoveTemp(Command));
+}
+
+void FVaCuusUIThread::AnswerBoundsQueries(bool bShuttingDown)
+{
+	check(IsInUIThread());
+
+	for (const TPair<uint32, TSharedRef<FVaCuusElementBoundsQuery>>& Pending : PendingBoundsQueries)
+	{
+		FVaCuusElementBoundsQuery& Query = *Pending.Value;
+
+		// Every document on the context, not just the one the host calls its own: a script can
+		// open more, and an id is what the asker knows, not which document holds it.
+		Rml::Element* Found = nullptr;
+		IVaCuusDocumentHost* Host = bShuttingDown ? nullptr : FindHost(Pending.Key);
+		if (Rml::Context* Context = Host != nullptr ? Host->GetContext() : nullptr)
+		{
+			const Rml::String Id(TCHAR_TO_UTF8(*Query.ElementId));
+			for (int32 Index = 0; Index < Context->GetNumDocuments() && Found == nullptr; ++Index)
+			{
+				Found = Context->GetDocument(Index)->GetElementById(Id);
+			}
+		}
+
+		if (Found != nullptr)
+		{
+			// The snapshot's own reads, for the snapshot's reason: after this frame's
+			// Context::Update() both are cached and clean (VaCuusInteractiveSnapshot.cpp's
+			// rect computation says why), so the rect is the one the player is about to see.
+			const Rml::Vector2f Position = Found->GetAbsoluteOffset(Rml::BoxArea::Border);
+			const Rml::Vector2f Size = Found->GetBox().GetSize(Rml::BoxArea::Border);
+			Query.Rect = FIntRect(FMath::FloorToInt(Position.x), FMath::FloorToInt(Position.y),
+				FMath::CeilToInt(Position.x + Size.x), FMath::CeilToInt(Position.y + Size.y));
+
+			// WITH ancestors: a hidden document hides its subtree through inheritance only after
+			// a style pass, and this asks the cached flag of every level instead of assuming one.
+			Query.bVisible = Found->IsVisible(/*include_ancestors=*/true);
+		}
+
+		Query.State.store(Found != nullptr ? FVaCuusElementBoundsQuery::EState::Found : FVaCuusElementBoundsQuery::EState::Missing,
+			std::memory_order_release);
+	}
+
+	PendingBoundsQueries.Reset();
 }
 
 void FVaCuusUIThread::EnqueueReleaseTextures(uint32 ViewId, const FString& Source)
@@ -1153,6 +1210,10 @@ void FVaCuusUIThread::Exit()
 			NumDropped);
 	}
 
+	// 0b. A bounds query drained in the last frame but never answered (the loop left before
+	// its record step) is answered Missing, so no asker is left polling a query that cannot move.
+	AnswerBoundsQueries(/*bShuttingDown=*/true);
+
 	// 1a. EVERY DOCUMENT CLOSES FIRST, while the script host is still alive (the
 	// spec 5 hard-stop split). CloseDocument() fires
 	// IVaCuusScriptHost::OnDocumentClosing through the host seam
@@ -1342,6 +1403,13 @@ void FVaCuusUIThread::RunFrame()
 		}
 	}
 
+	// AFTER every view recorded, so each answer reads the tree this frame laid out. An empty
+	// array test on every frame nobody asked anything, which is all of them in a game.
+	if (!PendingBoundsQueries.IsEmpty())
+	{
+		AnswerBoundsQueries(/*bShuttingDown=*/false);
+	}
+
 	// (js gc: M4) The controlled collection point, LAST in the frame: every view has
 	// recorded and published, so a pause here delays only the next wakeup, never this
 	// frame's output (spec 3.6). The host declines almost every call -- it collects on
@@ -1496,7 +1564,7 @@ void FVaCuusUIThread::DrainCommands()
 			// THE LIVE HALF (spec 2026-08-09 §1), and it happens HERE, immediately after the
 			// install, so that every `{{ t.* }}` re-evaluates against the table that just
 			// arrived rather than the one it replaced. One dirty per model covers every key in
-			// it: RmlUi tracks dirt by TOP-LEVEL name (DataExpression.cpp:1145-1154), and `t`
+			// it: RmlUi tracks dirt by TOP-LEVEL name (DataExpression.cpp:1146-1155), and `t`
 			// is that name. Costs a walk of the model map per PUSH -- not per frame.
 			for (TPair<uint32, TArray<TSharedRef<FVaCuusBoundModel>>>& Pair : Models)
 			{
@@ -1582,6 +1650,19 @@ void FVaCuusUIThread::DrainCommands()
 			continue;
 		}
 
+		if (Command->Kind == EVaCuusCommandKind::QueryElementBounds)
+		{
+			// Ahead of the host lookup, which drops an unknown view's command at Verbose: a
+			// dropped query would sit Pending until its asker gave up. Answered after the record
+			// loop, never here -- the tree has not been laid out for this frame yet, so a hide
+			// or a resize queued in the same drain would not be reflected.
+			if (Command->BoundsQuery.IsValid())
+			{
+				PendingBoundsQueries.Emplace(Command->ViewId, Command->BoundsQuery.ToSharedRef());
+			}
+			continue;
+		}
+
 		if (Command->Kind == EVaCuusCommandKind::DumpModel)
 		{
 			// AHEAD OF THE HOST LOOKUP, deliberately: the models are keyed on the view in
@@ -1629,6 +1710,19 @@ void FVaCuusUIThread::DrainCommands()
 		if (Command->ViewSize.X > 0 && Command->ViewSize.Y > 0)
 		{
 			Host->SetViewSize(Command->ViewSize);
+		}
+
+		// THE dp RATIO (bead VaCuus-w87.12). The view is laid out in PHYSICAL pixels -- the
+		// widget sizes it from its render bounding rect -- so without this `dp` meant `px` and
+		// a document authored in dp came out half size at 4K. Set on the context, not per
+		// document: RmlUi re-dirties every document's dp properties and media queries itself
+		// when the value changes (Context.cpp:155-170), and ignores an unchanged one.
+		if (Command->DpRatio > 0.0f)
+		{
+			if (Rml::Context* Context = Host->GetContext())
+			{
+				Context->SetDensityIndependentPixelRatio(Command->DpRatio);
+			}
 		}
 
 		switch (Command->Kind)
@@ -1909,9 +2003,9 @@ void FVaCuusUIThread::DropModelForRecompile(uint32 ViewId, const TSharedPtr<FVaC
 	//  2. Out of the write router, purging its pending reverts -- a revert flushed later this
 	//     frame must not DirtyVariable into the data model step 3 removes.
 	//  3. Context::RemoveDataModel, while the element tree is still up: it detaches every
-	//     root (SetDataModel(nullptr), Context.cpp:1106-1107) and destroys the DataModel
+	//     root (SetDataModel(nullptr), Context.cpp:1532-1533) and destroys the DataModel
 	//     holding the raw void* into the UI shadow -- which is what makes step 4 legal at
-	//     all. It also erases the NAME (data_models.erase, :1111), so a recovery re-bind
+	//     all. It also erases the NAME (data_models.erase, :1537), so a recovery re-bind
 	//     under the same name is not refused by CreateDataModel.
 	//  4. The buffers, through the model's drop-state machine (Reset within the fence
 	//     window, Abandon past it).
@@ -2057,11 +2151,16 @@ int32 FVaCuusUIThread::DrainAndDiscardCommands()
 	check(IsInUIThread());
 
 	int32 NumDropped = 0;
-	while (Queues->Commands.Dequeue())
+	while (TOptional<FVaCuusUICommand> Command = Queues->Commands.Dequeue())
 	{
 		// The dequeued command dies at the end of this iteration -- including, for an
 		// AddView, the host it carries, which was never booted and so holds nothing
-		// RmlUi-affine.
+		// RmlUi-affine. A bounds query is the one kind with someone waiting on it: answered
+		// Missing rather than left Pending (FVaCuusElementBoundsQuery's contract).
+		if (Command->Kind == EVaCuusCommandKind::QueryElementBounds && Command->BoundsQuery.IsValid())
+		{
+			Command->BoundsQuery->State.store(FVaCuusElementBoundsQuery::EState::Missing, std::memory_order_release);
+		}
 		++NumDropped;
 	}
 

@@ -213,7 +213,7 @@ void FVaCuusJsScriptHost::OnDocumentReady(uint32 ViewId, Rml::ElementDocument* D
 	// document host's AdoptDocument, after the old document's close (whose
 	// OnDocumentClosing already dispatched unload JS into the old context) and
 	// after Show() -- never Plugin::OnDocumentLoad, which fires inside
-	// Context::LoadDocument (Context.cpp:299) while the OLD context is current;
+	// Context::LoadDocument (Context.cpp:296) while the OLD context is current;
 	// running scripts there is v1's recorded bug (spec 12.1), restored and
 	// observed by the Reload test's red half.
 	TUniquePtr<FVaCuusJsViewContext>* Entry = ViewContexts.Find(ViewId);
@@ -1043,11 +1043,9 @@ void FVaCuusJsScriptHost::RebuildOverlay(uint32 ViewId, const FJsViewErrors& Sta
 
 	// THE COALESCING RULE (Task 8, from the Task 7 handoff): identical
 	// (source, message) pairs collapse into one line with a multiplicity
-	// suffix, so the engine's sync-module double-fire -- one throw, two
-	// unhandled rejections with the SAME stringified reason (the body promise
-	// and m->promise both reject unhandled, js_execute_sync_module reads state
-	// without attaching handlers, quickjs.c:31390-31410) -- reads as one error
-	// that happened, not two different ones. Newest-first; at most
+	// suffix. QuickJS 0.17 retracts the internal sync-module promise when its
+	// rejection is propagated (quickjs.c:32257-32260); genuinely outstanding
+	// duplicate rejections still share a display line. Newest-first; at most
 	// GOverlayDisplayLines distinct lines, with duplicates of a SHOWN line
 	// still counted into its suffix and distinct lines past the cap dropped.
 	struct FDisplayLine

@@ -407,7 +407,7 @@ public:
 	 * only fails when its body is instantiated.
 	 *
 	 * clang never instantiated that body. `Layout = FVaCuusModelLayout(...)`
-	 * (VaCuusDataArrayTest.cpp:91, VaCuusDataVariableTest.cpp:134) binds an rvalue, move
+	 * (VaCuusDataArrayTest.cpp:92, VaCuusDataVariableTest.cpp:134) binds an rvalue, move
 	 * assignment wins overload resolution, and the copy branch is never odr-used -- so the
 	 * ill-formed member sat there compiling on Linux and macOS for the whole life of the
 	 * file. MSVC defines the implicit copy-assignment eagerly and the body finally got
@@ -454,6 +454,31 @@ public:
 	 */
 	const FVaCuusModelField* FindField(FStringView InWireName) const;
 
+	/**
+	 * Members skipped by the exposure rule (neither CPF_BlueprintVisible nor CPF_Edit), as
+	 * dotted wire paths in declaration order -- this layout's own walk, nested structs included,
+	 * element layouts not. Each skip logs at Verbose only, because a struct with SOME unexposed
+	 * members is normal; this list is what lets the one default-verbosity line that matters --
+	 * "nothing bound" -- say which members and why (bead VaCuus-w87.3).
+	 */
+	TConstArrayView<FString> GetUnexposedNames() const { return UnexposedNames; }
+
+	/**
+	 * Properties dropped with a Warning or an Error, element layouts' members included: what a
+	 * bind summary must count so that "N of N" cannot read clean over a refusal (bead
+	 * VaCuus-w87.3). Exposure skips are not counted (see GetUnexposedNames), and neither are the
+	 * Log-level deprecated and editor-only skips, whose outcome is correct.
+	 */
+	int32 GetNumRefused() const { return NumRefused; }
+
+	/**
+	 * True for an ELEMENT layout that dropped a container member (bead VaCuus-w87.4), and the
+	 * one way an element layout of a type can differ from that type's root layout. The
+	 * definition registry keys on it as well as on the struct, so a row type used as a root
+	 * elsewhere never shares a definition set with its pruned element form.
+	 */
+	bool HasPrunedContainers() const { return bContainersPruned; }
+
 private:
 	/**
 	 * The element-layout form: the same build, threaded through the CALLER'S cycle stack.
@@ -462,8 +487,12 @@ private:
 	 * recursion; the stack of in-progress build roots is the one thing that spans them.
 	 * Private because the stack only means something mid-build: the sole caller is
 	 * BuildLevel's array interception, which checks the stack BEFORE constructing.
+	 *
+	 * InElementContext names the owning array for this build's diagnostics -- "VaCuus model
+	 * 'M': array property 'Rows' (TArray)" -- because a member refused inside a row is only
+	 * actionable when the reader can find the array it lives in.
 	 */
-	FVaCuusModelLayout(const UScriptStruct* InStruct, TArray<const UScriptStruct*>& BuildStack);
+	FVaCuusModelLayout(const UScriptStruct* InStruct, TArray<const UScriptStruct*>& BuildStack, FString InElementContext);
 
 	/** The one build body behind both constructors; keeps InStruct on the stack for its duration. */
 	void Build(const UScriptStruct* InStruct, TArray<const UScriptStruct*>& BuildStack);
@@ -491,6 +520,13 @@ private:
 	 * layout's table.)
 	 */
 	TArray<FVaCuusModelArrayDesc> ArrayDescs;
+
+	TArray<FString> UnexposedNames;
+	int32 NumRefused = 0;
+
+	/** Empty for a root build; the owning array's description for an element build. */
+	FString ElementContext;
+	bool bContainersPruned = false;
 };
 
 /**

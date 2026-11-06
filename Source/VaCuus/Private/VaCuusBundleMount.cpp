@@ -300,8 +300,9 @@ bool FVaCuusBundleMountTable::MountPackedOnDemand()
 
 	int32 NumShadowed = 0;
 	int32 NumTestsExcluded = 0;
-	TArray<VaCuusBundlePack::FSourceFile> Files = VaCuusBundlePack::EnumerateTree(
-		VaCuusContentPaths::GetDocumentRoots(), &NumShadowed, &NumTestsExcluded);
+	int32 NumDemosExcluded = 0;
+	TArray<VaCuusBundlePack::FSourceFile> Files =
+		VaCuusBundlePack::EnumerateShippedTree(&NumShadowed, &NumTestsExcluded, &NumDemosExcluded);
 
 	VaCuusBundleFormat::FCookedIndex Index;
 	TArray64<uint8> PayloadBytes;
@@ -321,9 +322,10 @@ bool FVaCuusBundleMountTable::MountPackedOnDemand()
 
 	// The timestamp is fine HERE (and would not be in SourceNote or the cook): a
 	// transient mount is never serialized, so nothing about determinism is at stake.
-	const FString Provenance = FString::Printf(TEXT("packed on demand at %s from: %s (%d shadowed, %d test fixtures excluded)"),
-		*FDateTime::Now().ToString(), *FString::Join(VaCuusContentPaths::GetDocumentRoots(), TEXT(" | ")),
-		NumShadowed, NumTestsExcluded);
+	const FString Provenance =
+		FString::Printf(TEXT("packed on demand at %s from: %s (%d shadowed, %d test fixtures excluded, %d plugin demo files excluded)"),
+			*FDateTime::Now().ToString(), *FString::Join(VaCuusContentPaths::GetDocumentRoots(), TEXT(" | ")), NumShadowed,
+			NumTestsExcluded, NumDemosExcluded);
 
 	return MountTransient(TEXT("<PackedOnDemand>"), Provenance, MoveTemp(Index), MoveTemp(PayloadBytes));
 }
@@ -461,6 +463,16 @@ FString GetConfiguredBundleAssetPath()
 		GConfig->GetString(TEXT("VaCuus"), TEXT("BundleAssetPath"), Path, GGameIni);
 	}
 	return Path;
+}
+
+bool ShouldPackPluginDemos()
+{
+	bool bPack = false;
+	if (GConfig != nullptr)
+	{
+		GConfig->GetBool(TEXT("VaCuus"), TEXT("bPackPluginDemos"), bPack, GGameIni);
+	}
+	return bPack;
 }
 }	 // namespace VaCuusBundleConfig
 

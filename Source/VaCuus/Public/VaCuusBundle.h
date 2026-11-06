@@ -83,6 +83,15 @@ VACUUS_API FString NormalizePath(const FString& InPath);
 VACUUS_API bool IsExcludedTestPath(const FString& NormalizedPath);
 
 /**
+ * True for what a project's documents may depend on from VaCuus's OWN DevUI root: stylesheets
+ * (vacuus-base.rcss, which every document links first) and fonts (the default face, which a
+ * Shipping build loads from the bundle and nowhere else). Everything else there is a demo --
+ * its documents, scripts and images -- and stays out of a project's bundle unless the project
+ * asks (VaCuusBundleConfig::ShouldPackPluginDemos; bead VaCuus-w87.14).
+ */
+VACUUS_API bool IsPluginRuntimeAsset(const FString& NormalizedPath);
+
+/**
  * The loose formats a bundle packs -- MUST track the RuntimeDependencies staging
  * globs in Source/VaCuus/VaCuus.Build.cs (and the live-reload watcher's whitelist),
  * for the reason recorded there: these are the formats the VFS actually reads.
@@ -135,9 +144,24 @@ struct FSourceFile
  * the same D19 precedence the loose VFS resolves with -- and EVERY shadowed loser is
  * logged with both disk paths (the stale-duplicate visibility rule, third venue).
  * The returned order is the enumeration order; Pack() sorts, so callers need not.
+ *
+ * AssetOnlyRoot, when it equals one of Roots, restricts THAT root to
+ * VaCuusBundleFormat::IsPluginRuntimeAsset files; the rest of it is counted in
+ * OutNumDemosExcluded and claims no path, so a later root's same-named file is packed
+ * instead of shadowed. The cook and the on-demand pack do not call this directly -- they
+ * call EnumerateShippedTree, which decides the root from the plugin and the project config.
  */
 VACUUS_API TArray<FSourceFile> EnumerateTree(const TArray<FString>& Roots, int32* OutNumShadowed = nullptr,
-	int32* OutNumTestsExcluded = nullptr);
+	int32* OutNumTestsExcluded = nullptr, const FString& AssetOnlyRoot = FString(), int32* OutNumDemosExcluded = nullptr);
+
+/**
+ * THE walk every shipped bundle is built from: GetDocumentRoots(), with VaCuus's own root
+ * restricted to its stylesheets and fonts unless the project set `[VaCuus] bPackPluginDemos`
+ * (bead VaCuus-w87.14). One function for the cook's dependency hash, the cook's pack and the
+ * editor's on-demand pack, so the three cannot disagree about what a bundle holds.
+ */
+VACUUS_API TArray<FSourceFile> EnumerateShippedTree(
+	int32* OutNumShadowed = nullptr, int32* OutNumTestsExcluded = nullptr, int32* OutNumDemosExcluded = nullptr);
 
 /**
  * Deterministic pack: sorts Files by normalized path (they are already lowercase, so

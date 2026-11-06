@@ -24,7 +24,7 @@ public:
 	 * lookup through the same immutable snapshot `vacuus.translate` reads
 	 * (FVaCuusTranslationRegistry). RmlUi calls this at TEXT INSTANCING — every
 	 * parsed text chunk (Factory.cpp:336), data-bound text re-evaluation
-	 * (DataViewDefault.cpp:369), textarea/title (XMLNodeHandlerTextArea.cpp:43,
+	 * (DataViewDefault.cpp:374), textarea/title (XMLNodeHandlerTextArea.cpp:43,
 	 * XMLNodeHandlerHead.cpp:123) — never again for text already in the tree, so a
 	 * new table reaches loaded documents only through a reload (the header of
 	 * UVaCuusSubsystem::SetTranslationTable carries the workflow).
@@ -44,7 +44,7 @@ public:
 	/**
 	 * Cursor shape is PUSH-based, and this is the only place it can be caught.
 	 * RmlUi calls this from inside Context::Update's hover-chain pass and ONLY when
-	 * the name changed (Context.cpp:1315-1327); there is no "what cursor do you want"
+	 * the name changed (Context.cpp:1785-1797); there is no "what cursor do you want"
 	 * query to answer from the game thread. So the name is latched here and each
 	 * host picks it up right after its own Update() -- see
 	 * GetVaCuusLatchedMouseCursor() for why that attributes the change to the right

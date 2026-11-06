@@ -31,7 +31,7 @@ namespace
  * latches in VaCuusSystemInterface.cpp: written and read only from the one thread allowed
  * to call into RmlUi at all.
  */
-TMap<const UScriptStruct*, TUniquePtr<FVaCuusModelDefinitions>> GDefinitionsByStruct;
+TMap<TPair<const UScriptStruct*, bool>, TUniquePtr<FVaCuusModelDefinitions>> GDefinitionsByStruct;
 int32 GNumRefusedSets = 0;
 
 /**
@@ -82,7 +82,7 @@ bool FVaCuusScalarDefinition::Get(void* InValuePtr, Rml::Variant& OutVariant)
 	// GUARDED EVEN THOUGH THE ONLY CALLER GUARDS FIRST. BasePointerDefinition::Get null-checks
 	// its own pointer before dereferencing (DataVariable.cpp:138-142), so this is unreachable
 	// today -- but RmlUi's own ScalarDefinition<T>::Get has no such check
-	// (DataVariable.h:74-78), and that missing check is a real crash in the library
+	// (DataVariable.h:83-87), and that missing check is a real crash in the library
 	// (research 8.3). Ours costs one predictable branch on a path that already does a virtual
 	// call.
 	if (InValuePtr == nullptr)
@@ -269,10 +269,19 @@ bool FVaCuusScalarDefinition::Set(void* InValuePtr, const Rml::Variant& Variant)
 	// Get lambda is the echo rule's comparison source (the router's class comment);
 	// it runs only for ATTRIBUTED writes, so the counted evaluation it costs never
 	// lands on an idle or M3-shaped path.
+	//
+	// DELIVERED, SO NOT A FAILURE (bead VaCuus-w87.1, vendored patch #10). RmlUi's Assign
+	// instruction read this `false` as a failed assignment and logged "Could not assign to
+	// variable." plus a program dump on every correct click -- three Warning lines per press,
+	// so a game's LogVaCuus was never clean. The mark tells the Assign site the value was
+	// handed on; the change-controller site never logged, and neither site dirties on
+	// `false`, so I3 is untouched. The REFUSAL below stays unmarked: a write nobody received
+	// is a genuine failure and keeps RmlUi's line.
 	if (FVaCuusWriteRouter::IsRouterRegistered()
 		&& FVaCuusWriteRouter::TryRouteScalarSet(DiagnosticPath, InValuePtr, Variant,
 			[this, InValuePtr](Rml::Variant& OutCurrent) { return Get(InValuePtr, OutCurrent); }))
 	{
+		MarkAssignmentDelivered();
 		return false;
 	}
 
@@ -304,7 +313,7 @@ bool FVaCuusScalarDefinition::Set(void* InValuePtr, const Rml::Variant& Variant)
 int FVaCuusScalarDefinition::Size(void* /*InValuePtr*/)
 {
 	// `data-for` over a leaf, which DataViewFor::Update reaches with no Type() check at all
-	// (DataViewDefault.cpp:498-503). The behaviour is RmlUi's own base contract -- 0, so the
+	// (DataViewDefault.cpp:510-515). The behaviour is RmlUi's own base contract -- 0, so the
 	// loop iterates no rows (DataVariable.cpp:40-44) -- but the base warning ("Tried to get
 	// the size from a non-array data type.") names nothing a UE-side author can find.
 	// LATCHED for the usual reason: a data-for target is re-resolved every time its root is
@@ -389,7 +398,7 @@ const FVaCuusStructDefinition::FMember* FVaCuusStructDefinition::Find(const Rml:
 	// A BYTE-EXACT MISS IS RETRIED IGNORING CASE, because outside the editor a member's
 	// segment is not necessarily spelled the way its author wrote it. The segment is
 	// GetAuthoredName(), which for a native member is its FName as a string
-	// (VaCuusModelLayout.cpp:757, Field.cpp:608-616, Class.cpp:2558-2565), and an FName keeps
+	// (VaCuusModelLayout.cpp:782, Field.cpp:608-616, Class.cpp:2558-2565), and an FName keeps
 	// its own spelling only WITH_CASE_PRESERVING_NAME, which is WITH_EDITORONLY_DATA
 	// (NameTypes.h:26-34). Without it FNamePool::Store looks the name up in the
 	// case-insensitive table and returns the entry already there (UnrealNames.cpp:1878-1901),
@@ -404,7 +413,7 @@ const FVaCuusStructDefinition::FMember* FVaCuusStructDefinition::Find(const Rml:
 	//
 	// UNAMBIGUOUS: the exact match wins whenever there is one, and the layout refuses a second
 	// member -- leaf or nested struct -- whose name equals an earlier one's ignoring case
-	// (VaCuusModelLayout.cpp:778, IsNestedNameTaken; FString equality ignores case,
+	// (VaCuusModelLayout.cpp:804, IsNestedNameTaken; FString equality ignores case,
 	// UnrealString.h.inl:912-915, StringView.h:877-880), so no two members of a level can
 	// both match. RmlUi folds ASCII only (StringUtilities.cpp:87-92,
 	// :413-428), which is every character a segment may hold (VaCuusModelLayout.cpp:555-568).
@@ -469,11 +478,11 @@ Rml::DataVariable FVaCuusStructDefinition::Child(void* InBase, const Rml::DataAd
 	// the library is compiled out of every configuration this plugin builds (spec 8).
 	//
 	// `.size` lands here too, and deliberately: RmlUi handles `address.name == "size"` INSIDE
-	// ArrayDefinition::Child (DataVariable.h:151-152), not in the core, so a struct has no
+	// ArrayDefinition::Child (DataVariable.h:160-161), not in the core, so a struct has no
 	// such member and `{{Origin.size}}` is a genuine mistake rather than a missing feature.
 	// Returning an empty DataVariable is safe -- every caller in Core tests
 	// `explicit operator bool` first (DataModel.cpp:285-290, :319; DataControllerDefault.cpp:57;
-	// DataExpression.cpp:1188).
+	// DataExpression.cpp:1189).
 	//
 	// LATCHED, AND THE STRING BUILD IS INSIDE THE LATCH. This is not a once-at-startup path: a
 	// missing member is re-resolved every time the expression re-evaluates, i.e. every time its
@@ -516,7 +525,7 @@ int FVaCuusStructDefinition::Size(void* /*InBase*/)
 {
 	// `data-for` over a struct level -- the scalar definition's Size() carries the whole
 	// argument (base contract at DataVariable.cpp:40-44, unchecked caller at
-	// DataViewDefault.cpp:498-503); this override only changes whose name is in the line.
+	// DataViewDefault.cpp:510-515); this override only changes whose name is in the line.
 	if (!bSizeMissLogged)
 	{
 		bSizeMissLogged = true;
@@ -585,20 +594,20 @@ Rml::DataVariable FVaCuusArrayDefinition::Child(void* InValuePtr, const Rml::Dat
 
 	// NAME FIRST, BOUNDS SECOND -- deliberately NOT RmlUi's order. Its ArrayDefinition::Child
 	// checks bounds first and matches "size" inside the out-of-bounds branch
-	// (DataVariable.h:143-163, the match at :151-152), which works because a named entry can
+	// (DataVariable.h:152-172, the match at :160-161), which works because a named entry can
 	// never be in bounds -- the name constructor pins index to -1 (DataTypes.h:38-39) and
 	// ParseAddress emits only {index >= 0} or {non-empty name, index == -1}, rejecting
 	// negatives and empties outright (DataModel.cpp:19-20, :34-36). Same partition, so the
 	// two orders are equivalent; this one exists so the two failure modes cannot share a
 	// message -- RmlUi reuses its misleading "Data array index out of bounds." for a named
-	// miss (DataVariable.h:154).
+	// miss (DataVariable.h:163).
 	if (Address.index < 0)
 	{
 		// THE "size" CASE IS THE ONE A HAND-ROLLED ARRAY DEFINITION BREAKS BY OMISSION:
 		// RmlUi implements `{{Arr.size}}` inside ArrayDefinition::Child, not in the core
-		// (DataVariable.h:151-152), so nothing else would answer it. MakeLiteralIntVariable
+		// (DataVariable.h:160-161), so nothing else would answer it. MakeLiteralIntVariable
 		// encodes the int in the DataVariable's ptr against a static definition
-		// (DataVariable.cpp:57-72; declared RMLUICORE_API at DataVariable.h:67).
+		// (DataVariable.cpp:57-72; declared RMLUICORE_API at DataVariable.h:76).
 		if (Address.name == "size")
 		{
 			return Rml::MakeLiteralIntVariable(Num);
@@ -676,14 +685,16 @@ FVaCuusModelDefinitions::FVaCuusModelDefinitions(const FVaCuusModelLayout& Layou
 			//    same-named field's.
 			//
 			//  - struct elements borrow the ELEMENT TYPE's root struct definition, fetched
-			//    through the registry keyed on the element UScriptStruct -- so two models
-			//    sharing a row type share its definitions, which is exactly why the array
-			//    definition must stay stateless (its class comment). The nested GetOrCreate
-			//    is safe re-entrancy: the outer call holds no pointer into the map while
-			//    this constructor runs and inserts only after it returns (GetOrCreate
-			//    below); and the recursion cannot loop, because the desc build refused
-			//    nested containers and container cycles before ever building the desc
-			//    (VaCuusModelLayout.cpp, BuildLevel's array interception).
+			//    through the registry keyed on the element UScriptStruct (and the pruning
+			//    bit, FVaCuusDefinitionRegistry's class comment) -- so two models sharing a
+			//    row type share its definitions, which is exactly why the array definition
+			//    must stay stateless (its class comment). The nested GetOrCreate is safe
+			//    re-entrancy: the outer call holds no pointer into the map while this
+			//    constructor runs and inserts only after it returns (GetOrCreate below); and
+			//    the recursion is one level deep at most, because an element layout never
+			//    holds an array -- its build refuses every container member -- and a root's
+			//    container cycle is refused before its desc is built (VaCuusModelLayout.cpp,
+			//    BuildLevel's array interception, both halves).
 			const FVaCuusModelArrayDesc* Desc = Field.ArrayDesc;
 			check(Desc != nullptr);
 
@@ -835,7 +846,8 @@ const FVaCuusModelDefinitions* FVaCuusDefinitionRegistry::GetOrCreate(const FVaC
 		return nullptr;
 	}
 
-	const UScriptStruct* Key = Layout.GetStruct();
+	// The struct AND whether this is a pruned element layout -- the class comment's policy bit.
+	const TPair<const UScriptStruct*, bool> Key(Layout.GetStruct(), Layout.HasPrunedContainers());
 	if (TUniquePtr<FVaCuusModelDefinitions>* Existing = GDefinitionsByStruct.Find(Key))
 	{
 		if (!(*Existing)->bStaleFromRecompile)
@@ -854,7 +866,7 @@ const FVaCuusModelDefinitions* FVaCuusDefinitionRegistry::GetOrCreate(const FVaC
 		// unreachable) set is not chased.
 		UE_LOG(LogVaCuus, Log,
 			TEXT("VaCuus definitions for '%s' were stale after a Blueprint struct recompile; rebuilt over the new property chain"),
-			*Key->GetName());
+			*Key.Key->GetName());
 		GDefinitionsByStruct.Remove(Key);
 		GNumStaleEvictions.fetch_add(1, std::memory_order_relaxed);
 	}
@@ -883,13 +895,18 @@ void FVaCuusDefinitionRegistry::MarkStale(const UScriptStruct* RecompiledStruct,
 	check(FVaCuusUIThread::IsInUIThread());
 
 	// A raw-pointer KEY comparison and a flag write -- RecompiledStruct is never dereferenced,
-	// so a type that was collected between enqueue and drain is simply a miss.
-	if (TUniquePtr<FVaCuusModelDefinitions>* Existing = GDefinitionsByStruct.Find(RecompiledStruct))
+	// so a type that was collected between enqueue and drain is simply a miss. BOTH policy
+	// variants: a recompile deletes the FProperty*s under the pruned element set too.
+	for (const bool bPruned : {false, true})
 	{
-		(*Existing)->bStaleFromRecompile = true;
-		UE_LOG(LogVaCuus, Log,
-			TEXT("VaCuus definitions for '%s' marked stale (Blueprint struct recompile); the next bind over the type rebuilds them"),
-			*StructName);
+		if (TUniquePtr<FVaCuusModelDefinitions>* Existing = GDefinitionsByStruct.Find({RecompiledStruct, bPruned}))
+		{
+			(*Existing)->bStaleFromRecompile = true;
+			UE_LOG(LogVaCuus, Log,
+				TEXT("VaCuus definitions for '%s'%s marked stale (Blueprint struct recompile); the next bind over the type ")
+					TEXT("rebuilds them"),
+				*StructName, bPruned ? TEXT(" (as an array element)") : TEXT(""));
+		}
 	}
 }
 

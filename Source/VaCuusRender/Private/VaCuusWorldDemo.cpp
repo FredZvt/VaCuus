@@ -292,7 +292,7 @@ static void SpawnPanel(FIntPoint Size, float Scale, FString DocumentPath, bool b
 	// `data-model` exactly once, in Element::SetParent when the body is parented
 	// (Element.cpp:2202-2219), so the model must exist before the load is enqueued.
 	// The queue is FIFO from this one producer, which is the whole ordering
-	// guarantee (the M4 StartModelDriver argument, VaCuusRender.cpp:662-672).
+	// guarantee (the M4 StartModelDriver argument, VaCuusRender.cpp:664-674).
 	Component->DocumentPath = DocumentPath;
 	Component->bAutoLoadDocument = !bInteractive;
 	Actor->SetRootComponent(Component);
@@ -724,7 +724,7 @@ static void StartInputSmoke(const TArray<FString>& Args)
 		}
 
 		// m4_demo.rml's one interactive element is #write-btn (`button` is a known
-		// interactive tag, VaCuusInteractiveSnapshot.cpp:109-114; nothing else in
+		// interactive tag, VaCuusInteractiveSnapshot.cpp:176-181; nothing else in
 		// the document takes input), so the snapshot names its rect without any
 		// document-side probing.
 		const FVaCuusInteractiveSnapshot& Snapshot = View->GetSnapshot();

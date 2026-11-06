@@ -11,7 +11,7 @@
 	     the cursor while the ORIGINAL stays in its slot until a drop is accepted,
 	     so a refused drop needs no undo. The clone is the only element that ever
 	     matches :drag -- RmlUi sets no pseudo-class on the source or on drop
-	     targets (Context.cpp:1504 is the single SetPseudoClass("drag") in the
+	     targets (Context.cpp:1978 is the single SetPseudoClass("drag") in the
 	     library) -- which is why every target highlight below is a JS-managed
 	     class, not a selector.
 
@@ -21,7 +21,7 @@
 	     and the press that should start a drag would fall through to the game.
 	     The panel title stays inert, m2_demo's discipline. -->
 	<div id="p-stash">
-		<div class="panel-title">STASH &#183; drag items to a matching slot</div>
+		<div class="panel-title">STASH : drag items to a matching slot</div>
 		<div id="stash-grid" vacuus-interactive>
 			<div id="st-0" class="slot" accepts="any"><div id="it-rifle" class="item weapon" itemtype="weapon">RIFLE</div></div>
 			<div id="st-1" class="slot" accepts="any"><div id="it-plate" class="item armor" itemtype="armor">PLATE</div></div>
@@ -41,7 +41,7 @@
 	     with visual feedback, which is the half of drag'n'drop most UIs get
 	     wrong. -->
 	<div id="p-equip">
-		<div class="panel-title">EQUIPMENT &#183; typed slots</div>
+		<div class="panel-title">EQUIPMENT : typed slots</div>
 		<div id="equip-col" vacuus-interactive>
 			<div id="eq-weapon" class="slot typed" accepts="weapon"></div><div class="slot-label lb-weapon">WEAPON</div>
 			<div id="eq-armor" class="slot typed" accepts="armor"></div><div class="slot-label lb-armor">ARMOR</div>
@@ -53,7 +53,7 @@
 	     refusal and cancelled drag rewrites it, so a screenshot -- or the
 	     automation test reading it back -- says what the input path just did. -->
 	<div id="p-status">
-		<div id="status">DRAG AN ITEM &#183; drop it on a matching slot</div>
+		<div id="status">DRAG AN ITEM : drop it on a matching slot</div>
 	</div>
 </body>
 </rml>

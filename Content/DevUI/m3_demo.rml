@@ -17,11 +17,11 @@
 
 	<!-- 1. TEXT SUBSTITUTION. `{{Field}}` is DataViewText: it evaluates the expression and
 	     calls ElementText::SetText only when the value actually CHANGED
-	     (DataViewDefault.cpp:354), which is the reason an unchanging model costs zero
+	     (DataViewDefault.cpp:359), which is the reason an unchanging model costs zero
 	     published frames and also the reason "0 published frames" alone cannot tell an idle
 	     model from one that dirties everything every frame. -->
 	<div id="p-scalars" data-class-alert="bAlert">
-		<div class="panel-title">1 &#183; SCALARS ({{Tick}} updates published)</div>
+		<div class="panel-title">1 : SCALARS ({{Tick}} updates published)</div>
 		<div class="row"><span class="key">CallSign</span><span class="val">{{CallSign}}</span></div>
 		<div class="row"><span class="key">Ammo</span><span class="val">{{Ammo}}</span></div>
 		<div class="row"><span class="key">Stance</span><span class="val">{{Stance}}</span></div>
@@ -35,7 +35,7 @@
 	     "%.3f" plus TrimTrailingDotZeros (TypeConverter.inl:282-295), so the label below reads
 	     three decimals at most while vacuus.DumpModel prints full precision. -->
 	<div id="p-bar">
-		<div class="panel-title">2 &#183; FLOAT AS GEOMETRY (data-style-width)</div>
+		<div class="panel-title">2 : FLOAT AS GEOMETRY (data-style-width)</div>
 		<div id="bar-track">
 			<div id="bar-fill" data-style-width="Health + '%'"/>
 		</div>
@@ -48,7 +48,7 @@
 	     them both. ParseAddress splits the dotted path and applies no name rule to the segments
 	     (DataModel.cpp:9-46), which is why `Size` would be legal here and not at the top. -->
 	<div id="p-nested">
-		<div class="panel-title">3 &#183; NESTED STRUCT (one top-level name, two leaves)</div>
+		<div class="panel-title">3 : NESTED STRUCT (one top-level name, two leaves)</div>
 		<div class="row"><span class="key">Target.Designation</span><span class="val">{{Target.Designation}}</span></div>
 		<div class="row"><span class="key">Target.Distance</span><span class="val">{{Target.Distance}}</span></div>
 	</div>
@@ -59,10 +59,10 @@
 	     The button is the I3 probe: `data-event-click="Ammo = 0"` reaches
 	     VariableDefinition::Set, which FVaCuusScalarDefinition REFUSES -- it returns false, logs
 	     once, and both RmlUi call sites then skip their own DirtyVariable
-	     (DataControllerDefault.cpp:57-59, DataExpression.cpp:1185-1197). Click it and Ammo does
+	     (DataControllerDefault.cpp:57-59, DataExpression.cpp:1186-1198). Click it and Ammo does
 	     NOT change; that is the whole of M3a's one-way contract, on screen. -->
 	<div id="p-write">
-		<div class="panel-title">4 &#183; WRITES ARE REFUSED (M3a is one-way)</div>
+		<div class="panel-title">4 : WRITES ARE REFUSED (M3a is one-way)</div>
 		<div id="probe" data-attr-vacuus-ammo="Ammo">ammo mirrored into an attribute</div>
 		<button id="write-btn" class="m3-btn" data-event-click="Ammo = 0">try to set Ammo = 0</button>
 		<div class="hint">Nothing happens, by design: see vacuus.DumpModel and the LogVaCuus warning.</div>
@@ -71,14 +71,14 @@
 	<!-- 5. THE M3b KILLFEED: `data-for` over a TArray of struct rows. The div carrying data-for
 	     is a hidden TEMPLATE, not the first row -- DataViewFor::Initialize sets `display: none`
 	     on it and every generated row is a clone of its tag and attributes (minus data-for)
-	     inserted BEFORE it (DataViewDefault.cpp:474, :523), which is why the row styling below
+	     inserted BEFORE it (DataViewDefault.cpp:479, :535), which is why the row styling below
 	     hangs off the template's own class list. `{{Killfeed.size}}` is answered by the array
 	     DEFINITION's Child(), not by the RmlUi core -- the one case a hand-rolled definition
 	     breaks by omission (VaCuusDataVariable.cpp:514-519).
 	     data-if writes a LOCAL `display: none` when false and REMOVES it when true
-	     (DataViewDefault.cpp:224-245), so the HS pill's stylesheet display is what shows. -->
+	     (DataViewDefault.cpp:229-250), so the HS pill's stylesheet display is what shows. -->
 	<div id="p-kills">
-		<div class="panel-title">5 &#183; KILLFEED (data-for over TArray, {{Killfeed.size}} rows)</div>
+		<div class="panel-title">5 : KILLFEED (data-for over TArray, {{Killfeed.size}} rows)</div>
 		<div class="row kill-row" data-for="kill : Killfeed">
 			<span class="killer">{{kill.Killer}}</span>
 			<span class="k-sep">&#187;</span>

@@ -32,7 +32,7 @@ var killTimer = 0;
 var dmgTimer = 0;
 
 // Change-gates for the per-frame rAF writes: RmlUi's own DataViewText skips the DOM
-// when a value did not change (DataViewDefault.cpp:354), and the JS bar keeps the same
+// when a value did not change (DataViewDefault.cpp:359), and the JS bar keeps the same
 // manners -- an unconditional per-frame style write would dirty layout every frame for
 // a value that moves visibly only a few times a second at this precision.
 var lastBarWidth = null;

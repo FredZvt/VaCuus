@@ -322,8 +322,12 @@ UVaCuusView* UVaCuusSubsystem::CreateView(TUniquePtr<IVaCuusDocumentHost> Host, 
 	View->InitializeView(this, ViewId, Status, InitialViewSize);
 	Views.Add(View);
 
-	UE_LOG(LogVaCuus, Log, TEXT("Created view %u (%dx%d) for game instance '%s'"),
-		ViewId, InitialViewSize.X, InitialViewSize.Y,
+	// "0x0" read like a null pointer in the field report (bead VaCuus-w87.17); an unsized view is
+	// the normal case for a widget, which learns its size at its first layout.
+	const FString SizeText = InitialViewSize.X > 0 && InitialViewSize.Y > 0
+		? FString::Printf(TEXT("%dx%d"), InitialViewSize.X, InitialViewSize.Y)
+		: FString(TEXT("size set at first layout"));
+	UE_LOG(LogVaCuus, Log, TEXT("Created view %u (%s) for game instance '%s'"), ViewId, *SizeText,
 		GetGameInstance() ? *GetGameInstance()->GetName() : TEXT("none"));
 	return View;
 }

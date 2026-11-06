@@ -1,6 +1,6 @@
 #include "DataModel.h"
 #include "../../Include/RmlUi/Core/DataTypeRegister.h"
-#include "../../Include/RmlUi/Core/Element.h"
+#include "../../Include/RmlUi/Core/ElementDocument.h" // VaCuus patch #11: was Element.h, which this includes
 #include "DataController.h"
 #include "DataView.h"
 
@@ -188,8 +188,8 @@ bool DataModel::InsertAlias(Element* element, const String& alias_name, DataAddr
 		return false;
 	}
 
-	if (variables.count(alias_name) == 1)
-		Log::Message(Log::LT_WARNING, "Alias variable '%s' is shadowed by a global variable.", alias_name.c_str());
+	if (variables.count(alias_name) == 1 && element && element->GetParentNode()) // VaCuus patch #11: a data-for row is unparented here; DataViewFor::Initialize reports it.
+		Log::Message(Log::LT_ERROR, "Alias '%s' on %s in '%s' is unreachable: the data model has a top-level variable of the same name, and every reference resolves to that first. Rename the alias.", alias_name.c_str(), element ? element->GetAddress().c_str() : "<no element>", element && element->GetOwnerDocument() ? element->GetOwnerDocument()->GetSourceURL().c_str() : "<no document>");
 
 	auto& map = aliases.emplace(element, SmallUnorderedMap<String, DataAddress>()).first->second;
 

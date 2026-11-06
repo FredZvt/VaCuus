@@ -19,6 +19,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/ScopeExit.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
@@ -556,9 +557,37 @@ bool FVaCuusBundleRoundTripTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	// THE PROJECT'S SETTING DECIDES WHAT THE REAL TREE PACKS (bead VaCuus-w87.14), so the test
+	// sets it both ways itself and puts back whatever the host project had: a buyer runs this
+	// suite with the default (no plugin demos), the plugin's own host with demos on.
+	bool bHostPacksDemos = false;
+	GConfig->GetBool(TEXT("VaCuus"), TEXT("bPackPluginDemos"), bHostPacksDemos, GGameIni);
+	ON_SCOPE_EXIT
+	{
+		GConfig->SetBool(TEXT("VaCuus"), TEXT("bPackPluginDemos"), bHostPacksDemos, GGameIni);
+	};
+
+	// The default first: VaCuus's own root gives the bundle its stylesheets and fonts and
+	// none of its demos. RESTORE-THE-BUG: pack with the plain walk again and m1_hud.rml reads
+	// present.
+	GConfig->SetBool(TEXT("VaCuus"), TEXT("bPackPluginDemos"), false, GGameIni);
+	if (TestTrue(TEXT("Pack-on-demand mounts with the default setting"), FVaCuusBundleMountTable::MountPackedOnDemand()))
+	{
+		const TSharedPtr<const FVaCuusBundleLookup> DefaultLookup = FVaCuusBundleMountTable::GetLookup();
+		if (TestTrue(TEXT("one mount"), DefaultLookup.IsValid() && DefaultLookup->Mounts.Num() == 1))
+		{
+			const TSharedRef<FVaCuusBundleMount> DefaultMount = DefaultLookup->Mounts[0];
+			TestNull(TEXT("by default a plugin DEMO document is not packed"), DefaultMount->FindEntry(TEXT("m1_hud.rml")));
+			TestNotNull(TEXT("the base stylesheet is"), DefaultMount->FindEntry(TEXT("m5hud/vacuus-base.rcss")));
+			TestNotNull(TEXT("and so is the default font"), DefaultMount->FindEntry(TEXT("fonts/latolatin-regular.ttf")));
+		}
+		FVaCuusBundleMountTable::UnmountAll();
+	}
+
 	// Pack + mount FIRST, boot SECOND: the boot's own default-font load is then the
 	// first bundle-served open, exactly as a cooked boot orders it (subsystem
-	// Initialize mounts before any view exists).
+	// Initialize mounts before any view exists). Demos on, because the round trip loads one.
+	GConfig->SetBool(TEXT("VaCuus"), TEXT("bPackPluginDemos"), true, GGameIni);
 	if (!TestTrue(TEXT("Pack-on-demand mounts"), FVaCuusBundleMountTable::MountPackedOnDemand()))
 	{
 		return false;

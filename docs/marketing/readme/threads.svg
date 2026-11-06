@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 404" width="1000" height="404" role="img" aria-label="One UI frame across three threads: the game thread enqueues and reads a snapshot, the UI thread updates and records, the render thread replays and composites">
+  <!--
+    README diagram (VaCuus-gmv.2). Hand-written, not generated: it restates the frame described in
+    CLAUDE.md "Architecture Overview" and docs/buyer/perf-guide.md, and must change if that does.
+
+    Drawn on a 1000-unit canvas because GitHub shows README images at roughly 830 px: a wider
+    canvas shrinks every label below legibility (the first draft was 1280 wide, and its 13 px
+    captions arrived at 8). Dark in both GitHub themes on purpose: the same reason the site keeps
+    a dark bezel round every screenshot (the vc-bezel token, site/.vitepress/theme/style.css).
+    No double hyphen may appear in this comment; XML rejects the whole file for one.
+  -->
+  <defs>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#e7edf5" stroke-opacity="0.04"/>
+    </pattern>
+    <radialGradient id="glow" cx="0.08" cy="0" r="0.6">
+      <stop offset="0" stop-color="#ffb43c" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffb43c" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#7b8794"/>
+    </marker>
+    <marker id="a-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#ffb43c"/>
+    </marker>
+    <marker id="a-cool" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#6fd3f7"/>
+    </marker>
+  </defs>
+
+  <style>
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .sans { font-family: 'Archivo', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .eyebrow { font-size: 13px; letter-spacing: 0.12em; }
+    .lane { font-size: 14px; font-weight: 600; letter-spacing: 0.1em; }
+    .cap { font-size: 13px; fill: #7b8794; }
+    .t { font-size: 18px; font-weight: 700; fill: #e7edf5; }
+    .s { font-size: 14px; fill: #a4afbc; }
+    .box { fill: #12171f; stroke: #e7edf5; stroke-opacity: 0.16; }
+    .ui { stroke: #ffb43c; stroke-opacity: 0.6; }
+    .tag { font-size: 13px; letter-spacing: 0.04em; }
+  </style>
+
+  <rect width="1000" height="404" rx="16" fill="#080a0d"/>
+  <rect width="1000" height="404" rx="16" fill="url(#grid)"/>
+  <rect width="1000" height="404" rx="16" fill="url(#glow)"/>
+  <rect x="0.5" y="0.5" width="999" height="403" rx="15.5" fill="none" stroke="#e7edf5" stroke-opacity="0.11"/>
+
+  <text x="28" y="40" class="mono eyebrow" fill="#ffb43c">ONE UI FRAME · THREE THREADS</text>
+  <text x="972" y="40" class="mono eyebrow" fill="#7b8794" text-anchor="end">EVERY RMLUI CALL ON THE UI THREAD</text>
+
+  <!-- lane rules -->
+  <path d="M24 166H976M24 286H976" stroke="#e7edf5" stroke-opacity="0.08" stroke-dasharray="3 6"/>
+
+  <!-- lane labels -->
+  <text x="28" y="108" class="mono lane" fill="#a4afbc">GAME</text>
+  <text x="28" y="128" class="mono cap">enqueue · read</text>
+  <text x="28" y="228" class="mono lane" fill="#ffb43c">UI</text>
+  <text x="28" y="248" class="mono cap">one per process</text>
+  <text x="28" y="348" class="mono lane" fill="#6fd3f7">RENDER</text>
+  <text x="28" y="368" class="mono cap">RHI · Slate</text>
+
+  <!-- game lane -->
+  <rect x="180" y="72" width="384" height="66" rx="8" class="box"/>
+  <text x="372" y="100" class="sans t" text-anchor="middle">Input, bindings, commands</text>
+  <text x="372" y="123" class="mono s" text-anchor="middle">enqueued, never waits</text>
+
+  <rect x="586" y="72" width="384" height="66" rx="8" class="box"/>
+  <text x="778" y="100" class="sans t" text-anchor="middle">Slate input routing</text>
+  <text x="778" y="123" class="mono s" text-anchor="middle">Handled? from the snapshot</text>
+
+  <!-- UI lane -->
+  <rect x="180" y="192" width="181" height="70" rx="8" class="box ui"/>
+  <text x="270.5" y="221" class="sans t" text-anchor="middle">Drain queue</text>
+  <text x="270.5" y="244" class="mono s" text-anchor="middle">input · data</text>
+
+  <rect x="383" y="192" width="181" height="70" rx="8" class="box ui"/>
+  <text x="473.5" y="221" class="sans t" text-anchor="middle">Update</text>
+  <text x="473.5" y="244" class="mono s" text-anchor="middle">layout · style</text>
+
+  <rect x="586" y="192" width="181" height="70" rx="8" class="box ui"/>
+  <text x="676.5" y="221" class="sans t" text-anchor="middle">Snapshot</text>
+  <text x="676.5" y="244" class="mono s" text-anchor="middle">hit-test regions</text>
+
+  <rect x="789" y="192" width="181" height="70" rx="8" class="box ui"/>
+  <text x="879.5" y="221" class="sans t" text-anchor="middle">Record</text>
+  <text x="879.5" y="244" class="mono s" text-anchor="middle">commands, no GPU</text>
+
+  <!-- one path per arrow: marker-end marks only a path's LAST vertex, not each subpath's -->
+  <path d="M363 227H380" stroke="#7b8794" stroke-width="1.5" marker-end="url(#a-ink)"/>
+  <path d="M566 227H583" stroke="#7b8794" stroke-width="1.5" marker-end="url(#a-ink)"/>
+  <path d="M769 227H786" stroke="#7b8794" stroke-width="1.5" marker-end="url(#a-ink)"/>
+
+  <!-- render lane; the dashed box is the idle gate (perf-guide.md, "1 frame in 6,910") -->
+  <rect x="180" y="312" width="384" height="66" rx="8" fill="none" stroke="#ffb43c" stroke-opacity="0.4" stroke-dasharray="4 5"/>
+  <text x="372" y="340" class="sans t" text-anchor="middle" style="fill:#ffb43c">Frame unchanged?</text>
+  <text x="372" y="363" class="mono s" text-anchor="middle">nothing crosses, no replay</text>
+
+  <rect x="586" y="312" width="181" height="66" rx="8" class="box"/>
+  <text x="676.5" y="340" class="sans t" text-anchor="middle">Replay to RT</text>
+  <text x="676.5" y="363" class="mono s" text-anchor="middle">RHI, per view</text>
+
+  <rect x="789" y="312" width="181" height="66" rx="8" class="box"/>
+  <text x="879.5" y="340" class="sans t" text-anchor="middle">Composite</text>
+  <text x="879.5" y="363" class="mono s" text-anchor="middle">every frame</text>
+
+  <path d="M769 345H786" stroke="#7b8794" stroke-width="1.5" marker-end="url(#a-ink)"/>
+
+  <!-- cross-thread traffic -->
+  <path d="M270.5 140V189" stroke="#a4afbc" stroke-width="1.5" marker-end="url(#a-ink)"/>
+  <text x="281" y="170" class="mono tag" fill="#a4afbc">queue</text>
+
+  <path d="M676.5 190V141" stroke="#6fd3f7" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a-cool)"/>
+  <text x="687" y="170" class="mono tag" fill="#6fd3f7">snapshot</text>
+
+  <path d="M879.5 264V286H700V309" fill="none" stroke="#ffb43c" stroke-width="1.5" marker-end="url(#a-amber)"/>
+  <text x="870" y="280" class="mono tag" fill="#ffb43c" text-anchor="end">command buffer</text>
+</svg>

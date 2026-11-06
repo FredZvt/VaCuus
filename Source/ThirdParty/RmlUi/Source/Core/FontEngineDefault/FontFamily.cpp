@@ -1,5 +1,6 @@
 #include "FontFamily.h"
 #include "../../../Include/RmlUi/Core/ComputedValues.h"
+#include "../../../Include/RmlUi/Core/Log.h" // VaCuus patch #13
 #include "../../../Include/RmlUi/Core/Math.h"
 #include "FontFace.h"
 #include <limits.h>
@@ -44,6 +45,12 @@ FontFaceHandleDefault* FontFamily::GetFaceHandle(Style::FontStyle style, Style::
 
 	if (!matching_face)
 		return nullptr;
+
+	// VaCuus patch #13 (VENDORED_TAG.txt): the nearest weight is drawn silently otherwise -- a bold title in a family that
+	// only has a regular face renders regular with nothing logged. Once per (style, weight), since this runs per element.
+	const int miss_key = (int)style * 10000 + (int)weight;
+	if (matching_face->GetWeight() != weight && reported_weight_misses.find(miss_key) == reported_weight_misses.end() && reported_weight_misses.insert(miss_key).second)
+		Log::Message(Log::LT_WARNING, "Font family '%s' has no %s face of weight %d; drawing its weight %d face instead. Load the missing face with LoadFontFace.", name.c_str(), style == Style::FontStyle::Italic ? "italic" : "normal", (int)weight, (int)matching_face->GetWeight());
 
 	return matching_face->GetHandle(size, true);
 }

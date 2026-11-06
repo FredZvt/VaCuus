@@ -210,7 +210,7 @@ public:
 	 * content hash, not the resource-traffic predicate. Left alone, a document showing a
 	 * render target publishes once and freezes on whatever it had. This is the same class
 	 * of problem as a live material decorator and it takes the same remedy
-	 * (VaCuusRecordingRenderInterface.cpp:1626-1665) — the only question is what triggers
+	 * (VaCuusRecordingRenderInterface.cpp:1835-1874) — the only question is what triggers
 	 * it, and an explicit signal is the honest answer: the game knows when it captured.
 	 *
 	 * bLive at registration is sugar for "dirty every frame" and is IMPLEMENTED as that,

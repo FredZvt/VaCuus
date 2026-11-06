@@ -103,10 +103,10 @@ ANNOTATIONS = {
     "display": "No CSS Grid in RmlUi (flex-first is the market bar, arch spec 1); the keyword "
     "list here is exhaustive.",
     "drag": "Only `drag-drop` and `clone` send dragover/dragout/dragdrop/dragmove -- plain `drag` "
-    "sends dragstart/drag/dragend and nothing else (Context.cpp:692 sets drag_verbose for exactly "
+    "sends dragstart/drag/dragend and nothing else (Context.cpp:767 sets drag_verbose for exactly "
     "those two), and `block` stops an ancestor from becoming the drag source. `clone` ships a "
     "ghost under the cursor styleable via `:drag` -- the ONE drag pseudo-class, set on the clone "
-    "only (Context.cpp:1504); sources and targets get no pseudo-class at all. Shipped reference: "
+    "only (Context.cpp:1978); sources and targets get no pseudo-class at all. Shipped reference: "
     "vacuus.DragDemo + gotchas.md #24; proven by VaCuus.Js.DragDrop.",
     "position": "absolute resolves against the nearest positioned ancestor; there is no "
     "browser-style default-positioned root chain past the document "
@@ -179,7 +179,9 @@ def main():
     factory = FACTORY_CPP.read_text()
     sha = SHA_FILE.read_text().strip()
     props, shorthands = parse_properties(spec)
-    decorators = parse_instancers(factory, "Decorator")
+    decorators = [(name, f"Factory.cpp:{line}") for name, line in parse_instancers(factory, "Decorator")]
+    svg_plugin = ROOT / "Source/ThirdParty/RmlUi/Source/SVG/SVGPlugin.cpp"
+    decorators += [(name, f"SVGPlugin.cpp:{line}") for name, line in parse_instancers(svg_plugin.read_text(), "Decorator")]
     filters = parse_instancers(factory, "Filter")
     font_effects = parse_instancers(factory, "FontEffect")
     fstart, fend = func_lines(spec, "void StyleSheetSpecification::RegisterDefaultProperties()")
@@ -194,7 +196,7 @@ def main():
     w.append("property and shorthand tables are parsed mechanically from")
     w.append(f"`StyleSheetSpecification::RegisterDefaultProperties` (StyleSheetSpecification.cpp:{fstart}-{fend}");
     w.append("in this vendored tree); the decorator/filter/font-effect names from the")
-    w.append("`Factory::RegisterDefault*Instancers` registrations in Factory.cpp. The Notes")
+    w.append("`Factory::RegisterDefault*Instancers` registrations in Factory.cpp and the enabled SVG plugin. The Notes")
     w.append("column is hand-maintained inside the generator script (plugin-side truth with")
     w.append("source cites) and survives regeneration.")
     w.append("")
@@ -271,10 +273,10 @@ def main():
     w.append("and the corner stays square. Spell a circle as half its own side")
     w.append("(`width: 64px; border-radius: 32px`).")
     w.append("")
-    w.append("| Decorator | Factory.cpp line |")
+    w.append("| Decorator | Registration |")
     w.append("|---|---|")
     for name, line in decorators:
-        w.append(f"| `{name}` | :{line} |")
+        w.append(f"| `{name}` | {line} |")
     w.append("")
     w.append(f"## Filters ({len(filters)} registered names) -- blur-only in v1")
     w.append("")

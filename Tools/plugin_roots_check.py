@@ -66,7 +66,10 @@ def run(args):
         with log.with_suffix(".stdout").open("w") as stdout:
             process = subprocess.Popen([
                 str(editor), str(project), "-unattended", "-nullrhi", "-nosplash",
-                "-abslog=" + str(log), "-ExecCmds=Automation RunTests " + args.filter + ", Quit,",
+                "-abslog=" + str(log),
+                # '; Quit' is Automation's own Quit: it exits once the run completes
+                # (docs/buyer/setup.md section 4). The marker wait below still covers both endings.
+                "-ExecCmds=Automation RunTests " + args.filter + "; Quit",
             ], stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.STDOUT, start_new_session=True)
             try:
                 deadline = time.monotonic() + args.timeout
@@ -83,7 +86,7 @@ def run(args):
                 else:
                     raise RuntimeError("Automation timed out; inspect " + str(log))
             finally:
-                # Quit can remain deferred after automation. Stop only the PID we launched.
+                # Normally gone already; a stuck editor is stopped by the PID we launched, never by pattern.
                 if process.poll() is None:
                     process.terminate()
                     try:

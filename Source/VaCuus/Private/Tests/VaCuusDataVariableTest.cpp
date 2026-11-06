@@ -33,7 +33,7 @@ namespace VaCuusDataVariableTest
  *
  * READ AS ATTRIBUTES, NOT AS TEXT, and that is not a shortcut: DataViewAttribute::Update
  * runs the same expression, gets the same Variant and converts it with the same
- * `variant.Get<String>()` as the text view (DataViewDefault.cpp:66-86 against :341-380),
+ * `variant.Get<String>()` as the text view (DataViewDefault.cpp:66-86 against :346-385),
  * but it lands somewhere a test can read without a font engine or a laid-out text run.
  */
 struct FObserved
@@ -65,7 +65,7 @@ static const char* GModelName = "hud";
  * much as the values: a member the struct does NOT have, and a document-side ASSIGNMENT.
  *
  * `Origin.size` is deliberate. RmlUi handles `address.name == "size"` INSIDE
- * ArrayDefinition::Child (DataVariable.h:151-152) and nowhere else, so a struct asked for
+ * ArrayDefinition::Child (DataVariable.h:160-161) and nowhere else, so a struct asked for
  * it must produce a diagnostic and an empty DataVariable rather than dereference a null
  * definition -- DataVariable::Get does not null-check `definition` at all
  * (DataVariable.cpp:5-8).
@@ -108,7 +108,7 @@ static const TCHAR* GDocument = TEXT(R"(<rml>
  *
  * WHY A HOST AND NOT A BARE CONTEXT ON THE TEST THREAD. FVaCuusDefinitionRegistry asserts
  * FVaCuusUIThread::IsInUIThread(), and that is backed by GVaCuusUIThreadId, which only the
- * UI thread's own boot publishes (VaCuusUIThread.cpp:913). Booting RmlUi from an
+ * UI thread's own boot publishes (VaCuusUIThread.cpp:969). Booting RmlUi from an
  * automation thread -- what VaCuus.Core.Boot does -- claims the LIBRARY without ever
  * making that thread the UI thread, so the assert would fire. Driving a real UI thread is
  * therefore not ceremony: it is the only configuration in which this code is allowed to
@@ -576,7 +576,7 @@ bool FVaCuusDataBindingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("and the shadow is unchanged"), Host->ShadowRatioAfterClick, 0.25f);
 
 	// The DOM did not move either, because both RmlUi call sites skip their DirtyVariable
-	// when Set returns false (DataControllerDefault.cpp:57-59, DataExpression.cpp:1185-1197).
+	// when Set returns false (DataControllerDefault.cpp:57-59, DataExpression.cpp:1186-1198).
 	TestEqual(TEXT("and nothing on screen changed"), FCString::Atof(*Host->AfterClick.Ratio), 0.25f);
 
 	// ---- 5. The read path still works afterwards. ----

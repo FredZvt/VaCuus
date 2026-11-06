@@ -50,9 +50,7 @@ public class VaCuusRml : ModuleRules
 			string Declared = string.Join(", ", Descriptor.GetSupportedTargetPlatformNames() ?? new string[0]);
 			throw new BuildException(
 				$"VaCuus does not support {Target.Platform}. VaCuus.uplugin declares SupportedTargetPlatforms " +
-				$"= [{Declared}], and the plugin has never been built or run anywhere else. Android and iOS in " +
-				$"particular are not merely unbuilt: text entry, touch scrolling and app-lifecycle handling are " +
-				$"unimplemented there (docs/research/mobile-support.md costs the work out). You are seeing this " +
+				$"= [{Declared}], and the plugin has never been built or run anywhere else. You are seeing this " +
 				$"message -- rather than the plugin quietly vanishing, which is what happens without a module " +
 				$"dependency -- because one of your modules depends on a VaCuus module, which makes UBT compile " +
 				$"part of the plugin even after dropping it for {Target.Platform}. Drop the dependency for this " +
@@ -94,7 +92,8 @@ public class VaCuusRml : ModuleRules
 		// Warnings in our OWN code are untouched on every platform; only the vendored
 		// headers go quiet.
 		PublicSystemIncludePaths.Add(Path.Combine(RmlRoot, "Include"));
-		PublicDefinitions.Add("RMLUI_CUSTOM_RTTI=1");
+		// RmlUi 6.3 always supplies custom RTTI; identify this vendored release in diagnostics.
+		PrivateDefinitions.Add("RMLUI_VERSION=\"6.3\"");
 
 		// RMLUI_DEBUG: DELIBERATELY NOT DEFINED HERE, IN ANY CONFIGURATION -- this comment is
 		// the decision record (bead VaCuus-akj.11). The vendored default chain is
@@ -141,6 +140,13 @@ public class VaCuusRml : ModuleRules
 		// Compile-time switch in Core.cpp that installs FontEngineInterfaceDefault
 		// (FreeType) as the default font engine; only read by .cpp files, so Private.
 		PrivateDefinitions.Add("RMLUI_FONT_ENGINE_FREETYPE=1");
+		PrivateDefinitions.AddRange(new[] {
+			"RMLUI_SVG_PLUGIN=1", "RMLUI_LOTTIE_PLUGIN=1",
+			"LUNASVG_BUILD_STATIC=1", "PLUTOVG_BUILD_STATIC=1", "RLOTTIE_BUILD_STATIC=1",
+			"LUNASVG_DISABLE_LOAD_SYSTEM_FONTS=1", "PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD=1",
+			"RLOTTIE_NO_NEON_ASM=1"
+		});
+		PrivateDependencyModuleNames.Add("VaCuusVectorDependencies");
 
 		PrivateDependencyModuleNames.AddRange(new[] { "Core" });
 

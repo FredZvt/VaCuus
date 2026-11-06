@@ -17,6 +17,7 @@
 #include "VaCuusSubsystem.h"
 #include "VaCuusTranslation.h"
 #include "VaCuusUIShaders.h"
+#include "VaCuusUIThread.h"
 #include "VaCuusView.h"
 
 #include "Containers/Ticker.h"
@@ -30,6 +31,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
+#include "HAL/PlatformTime.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Pawn.h"
@@ -1460,7 +1462,14 @@ static void HitTest(const TArray<FString>& Args)
 }
 
 /**
- * Puts the pointer at a window position and lets Slate route the move.
+ * Puts the pointer at a position and lets Slate route the move.
+ *
+ * THE POSITION IS IN SCREEN PIXELS, and every vacuus.* pointer command shares this one
+ * coordinate space (bead VaCuus-w87.15). FPointerEvent's first position IS the screen-space
+ * position (Events.h:721-731), and Slate hit-tests windows in desktop
+ * space, so a value read off a screenshot means "this window pixel" only while the window's
+ * top-left sits at the desktop origin -- always true offscreen and in fullscreen, untrue for
+ * a windowed editor that is not at 0,0. The help texts used to say "window pixels".
  *
  * DELIBERATELY GOES THROUGH FSlateApplication rather than calling the widget: this
  * way the whole real path is exercised -- hit-test grid, bubble path,
@@ -1577,8 +1586,8 @@ bool ClickWhereThePointerIs(const FVector2D& Position)
  *
  * THE MOVE FIRST IS NOT A CONVENIENCE. Rml::Context::ProcessMouseWheel resolves its scroll
  * target from the HOVER element and returns immediately when there is none
- * (Context.cpp:811-814), and hover is only ever set by a processed mouse move
- * (Context.cpp:1311). A wheel event delivered to a context that has never seen a position
+ * (Context.cpp:886-889), and hover is only ever set by a processed mouse move
+ * (Context.cpp:1781). A wheel event delivered to a context that has never seen a position
  * scrolls nothing, silently -- so the pair is what the real path looks like anyway.
  *
  * Delta is in WHEEL NOTCHES, positive up, which is UE's convention;
@@ -1731,7 +1740,7 @@ static void SimulateMouseMove(const TArray<FString>& Args)
 {
 	if (Args.Num() < 2)
 	{
-		UE_LOG(LogVaCuus, Error, TEXT("vacuus.M1HUD.Mouse expects two arguments: <x> <y> in window pixels"));
+		UE_LOG(LogVaCuus, Error, TEXT("vacuus.M1HUD.Mouse expects two arguments: <x> <y> in screen pixels"));
 		return;
 	}
 
@@ -1740,7 +1749,7 @@ static void SimulateMouseMove(const TArray<FString>& Args)
 
 static FAutoConsoleCommand GSimulateMouseCommand(
 	TEXT("vacuus.M1HUD.Mouse"),
-	TEXT("Move the pointer to <x> <y> (window pixels) through Slate's real routing. Headless hover verification."),
+	TEXT("Move the pointer to <x> <y> (screen pixels -- the window's own while it sits at 0,0, as offscreen and fullscreen windows do) through Slate's real routing. Headless hover verification."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&SimulateMouseMove));
 
 /**
@@ -2068,7 +2077,7 @@ static void TypeShot(const TArray<FString>& Args)
 	if (Args.Num() < 2)
 	{
 		UE_LOG(LogVaCuus, Error,
-			TEXT("vacuus.M1HUD.TypeShot expects <x> <y> [text]: window pixels of the field, then what to type"));
+			TEXT("vacuus.M1HUD.TypeShot expects <x> <y> [text]: screen pixels of the field, then what to type"));
 		return;
 	}
 
@@ -2863,6 +2872,11 @@ static void StartTexDemo(UVaCuusView* View, UWorld* World)
 	}
 }
 
+static FAutoConsoleCommand GVectorDemoCommand(
+	TEXT("vacuus.VectorDemo"),
+	TEXT("Toggle the SVG and Lottie demo (DevUI/vector_demo.rml)."),
+	FConsoleCommandDelegate::CreateLambda([] { Toggle(TEXT("vector_demo.rml")); }));
+
 static FAutoConsoleCommand GTexDemoCommand(
 	TEXT("vacuus.TexDemo"),
 	TEXT("Toggle the engine-texture demo (DevUI/tex_demo.rml): three <img src=\"unreal://...\"> tiles proving the three ")
@@ -3116,7 +3130,7 @@ static void Wheel(const TArray<FString>& Args)
 	if (Args.Num() < 3)
 	{
 		UE_LOG(LogVaCuus, Error,
-			TEXT("vacuus.M2Demo.Wheel expects <x> <y> <delta> [delaySeconds]: window pixels, then notches (+ is up)"));
+			TEXT("vacuus.M2Demo.Wheel expects <x> <y> <delta> [delaySeconds]: screen pixels, then notches (+ is up)"));
 		return;
 	}
 
@@ -3132,7 +3146,7 @@ static void Drag(const TArray<FString>& Args)
 	if (Args.Num() < 4)
 	{
 		UE_LOG(LogVaCuus, Error,
-			TEXT("vacuus.M2Demo.Drag expects <x0> <y0> <x1> <y1> [steps] [delaySeconds], in window pixels"));
+			TEXT("vacuus.M2Demo.Drag expects <x0> <y0> <x1> <y1> [steps] [delaySeconds], in screen pixels"));
 		return;
 	}
 
@@ -3143,6 +3157,121 @@ static void Drag(const TArray<FString>& Args)
 
 	ScheduleAfter(DelaySeconds, [From, To, Steps] { DragFromTo(From, To, Steps); });
 }
+
+/**
+ * vacuus.Click <element-id> [delaySeconds] [viewId] -- a press and release on the element with
+ * that id, through Slate's real routing (bead VaCuus-w87.15).
+ *
+ * WHY: the only headless driver used to be coordinates read off a screenshot, and a field
+ * report built its whole UI check on them -- then watched every button below a data-if line
+ * move, and every coordinate move again after a resize. This aims at the element itself: the
+ * UI thread answers where it is after its next layout (FVaCuusElementBoundsQuery), the widget
+ * that shows the view turns the centre into a screen position (ViewPixelsToScreen_Debug), and
+ * the press goes through FSlateApplication exactly as vacuus.M2Demo.Drag's does, with the same
+ * verdict line -- "taken by THE UI" or "taken by THE GAME".
+ *
+ * Not a demo command: it works on any view a SVaCuusWidget shows. With one such view the id
+ * is enough; with several, name the view (ids are printed when it is ambiguous).
+ */
+static void ClickWhenAnswered(
+	const TSharedRef<FVaCuusElementBoundsQuery>& Query, const TWeakPtr<SVaCuusWidget>& WeakWidget, double Deadline)
+{
+	const FVaCuusElementBoundsQuery::EState State = Query->State.load(std::memory_order_acquire);
+	if (State == FVaCuusElementBoundsQuery::EState::Pending)
+	{
+		if (FPlatformTime::Seconds() > Deadline)
+		{
+			UE_LOG(LogVaCuus, Error, TEXT("vacuus.Click '%s': the UI thread did not answer within 5 s"), *Query->ElementId);
+			return;
+		}
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+			[Query, WeakWidget, Deadline](float)
+			{
+				ClickWhenAnswered(Query, WeakWidget, Deadline);
+				return false;
+			}));
+		return;
+	}
+
+	const TSharedPtr<SVaCuusWidget> Widget = WeakWidget.Pin();
+	if (State == FVaCuusElementBoundsQuery::EState::Missing || !Widget.IsValid())
+	{
+		UE_LOG(LogVaCuus, Error, TEXT("vacuus.Click '%s': no element with that id in the view's documents (ids are case-sensitive)"),
+			*Query->ElementId);
+		return;
+	}
+	if (!Query->bVisible || Query->Rect.Area() <= 0)
+	{
+		UE_LOG(LogVaCuus, Error,
+			TEXT("vacuus.Click '%s': the element exists but is not visible (or has no area: %dx%d), so nothing could press it"),
+			*Query->ElementId, Query->Rect.Width(), Query->Rect.Height());
+		return;
+	}
+
+	// The centre of the border box, half-open like every snapshot rect.
+	const FVector2D ViewCentre((Query->Rect.Min.X + Query->Rect.Max.X) * 0.5, (Query->Rect.Min.Y + Query->Rect.Max.Y) * 0.5);
+	const FVector2D Screen = Widget->ViewPixelsToScreen_Debug(ViewCentre);
+	UE_LOG(LogVaCuus, Log, TEXT("vacuus.Click '%s': border box (%d,%d)-(%d,%d) in view pixels, centre at screen (%.0f, %.0f)"),
+		*Query->ElementId, Query->Rect.Min.X, Query->Rect.Min.Y, Query->Rect.Max.X, Query->Rect.Max.Y, Screen.X, Screen.Y);
+
+	MoveMouseTo(Screen);
+	ClickWhereThePointerIs(Screen);
+}
+
+static void ClickElement(const FString& ElementId, uint32 WantedViewId)
+{
+	TArray<TSharedRef<SVaCuusWidget>> Candidates;
+	for (const TSharedRef<SVaCuusWidget>& Widget : SVaCuusWidget::GetLiveWidgets_Debug())
+	{
+		const UVaCuusView* WidgetView = Widget->GetView_Debug();
+		if (WidgetView != nullptr && (WantedViewId == 0 || WidgetView->GetViewId() == WantedViewId))
+		{
+			Candidates.Add(Widget);
+		}
+	}
+
+	if (Candidates.Num() != 1)
+	{
+		FString Ids;
+		for (const TSharedRef<SVaCuusWidget>& Widget : SVaCuusWidget::GetLiveWidgets_Debug())
+		{
+			if (const UVaCuusView* WidgetView = Widget->GetView_Debug())
+			{
+				Ids += FString::Printf(TEXT(" %u"), WidgetView->GetViewId());
+			}
+		}
+		UE_LOG(LogVaCuus, Error, TEXT("vacuus.Click '%s': %s; views on screen:%s"), *ElementId,
+			Candidates.IsEmpty() ? TEXT("no screen view matches") : TEXT("more than one screen view -- pass a view id"),
+			Ids.IsEmpty() ? TEXT(" none") : *Ids);
+		return;
+	}
+
+	TSharedRef<FVaCuusElementBoundsQuery> Query = MakeShared<FVaCuusElementBoundsQuery>();
+	Query->ElementId = ElementId;
+	Candidates[0]->GetView_Debug()->QueryElementBounds(Query);
+	ClickWhenAnswered(Query, Candidates[0], FPlatformTime::Seconds() + 5.0);
+}
+
+static void Click(const TArray<FString>& Args)
+{
+	if (Args.Num() < 1)
+	{
+		UE_LOG(LogVaCuus, Error, TEXT("vacuus.Click expects <element-id> [delaySeconds] [viewId]"));
+		return;
+	}
+
+	const FString ElementId = Args[0];
+	const float DelaySeconds = Args.Num() > 1 ? FCString::Atof(*Args[1]) : 0.0f;
+	const uint32 ViewId = Args.Num() > 2 ? uint32(FCString::Atoi(*Args[2])) : 0;
+	ScheduleAfter(DelaySeconds, [ElementId, ViewId] { ClickElement(ElementId, ViewId); });
+}
+
+static FAutoConsoleCommand GClickCommand(
+	TEXT("vacuus.Click"),
+	TEXT("Press and release the left button on the element with <element-id> (case-sensitive), through Slate's real ")
+	TEXT("routing, and log who took the press. Optional [delaySeconds], and [viewId] when more than one screen view is ")
+	TEXT("up. The element is located by the UI thread after its next layout, so it survives data-if lines and resizes."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&Click));
 
 static FAutoConsoleCommand GWheelCommand(
 	TEXT("vacuus.M2Demo.Wheel"),

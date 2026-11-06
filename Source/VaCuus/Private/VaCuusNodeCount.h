@@ -25,8 +25,8 @@ namespace VaCuusNodeCount
  *    the children array, Element.cpp:1147-1150);
  *  - EXCLUDING any element carrying the data-for attribute and its whole
  *    subtree: that element is the hidden clone template (display:none,
- *    DataViewDefault.cpp:474), never painted; the generated rows it clones
- *    drop the attribute (:486-489) and are counted normally.
+ *    DataViewDefault.cpp:479), never painted; the generated rows it clones
+ *    drop the attribute (:491-494) and are counted normally.
  *
  * UI thread only (checked): the tree is the UI thread's, and the count is
  * meaningful only between that thread's own frames.

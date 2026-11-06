@@ -52,7 +52,7 @@ class UVaCuusView;
  * CONTROL before the controller asks anybody: a checkbox toggles its `checked` attribute
  * inside ProcessDefaultAction (InputTypeCheckbox.cpp:43-46) and only then dispatches the
  * change event whose controller calls Set -- and a false Set skips DirtyVariable at both
- * call sites (DataControllerDefault.cpp:57-59, DataExpression.cpp:1190-1194), so nothing
+ * call sites (DataControllerDefault.cpp:57-59, DataExpression.cpp:1191-1195), so nothing
  * ever re-evaluates the control and it stays visually toggled against an unchanged model
  * FOREVER (v1's recorded divergence, spec 12.6). So every routed write also queues its
  * top-level name here, and FVaCuusUIThread::ApplyModelUpdates flushes the queue --

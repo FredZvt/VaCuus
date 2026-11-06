@@ -123,7 +123,7 @@ public:
 	 * UVaCuusWidget::RebuildWidget creates its view at FIntPoint::ZeroValue on purpose
 	 * (VaCuusUMGWidget.cpp:75-76) and SynchronizeProperties loads the document immediately
 	 * afterwards (:121-122), while the only correct size arrives on the first
-	 * SVaCuusWidget::Tick (SVaCuusWidget.cpp:253-256). Finished payloads decoded in that window
+	 * SVaCuusWidget::Tick (SVaCuusWidget.cpp:344-347). Finished payloads decoded in that window
 	 * -- one measured at 144 MB for a single 6000x6000 PNG (bead akj.6.25) -- used to sit in the
 	 * recorder's queue for the whole unsized window, which for a widget that is never arranged
 	 * is the rest of the session.
@@ -146,7 +146,7 @@ public:
 	 * WHY THIS EXISTS AT ALL. RmlUi's FileTextureDatabase has NO eviction: an entry is
 	 * cleared only by an explicit release, and closing a document or destroying the element
 	 * does not do it (TextureDatabase.cpp:151-178, and the recorder's own note at
-	 * VaCuusRecordingRenderInterface.cpp:1436). A catalogue screen therefore accumulates
+	 * VaCuusRecordingRenderInterface.cpp:1723). A catalogue screen therefore accumulates
 	 * images for the life of the UI thread unless someone asks.
 	 *
 	 * IT IS SAFE ON A LIVE IMAGE, and that is what makes it usable rather than a footgun:

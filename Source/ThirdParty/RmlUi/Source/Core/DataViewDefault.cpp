@@ -1,7 +1,7 @@
 #include "DataViewDefault.h"
 #include "../../Include/RmlUi/Core/Core.h"
 #include "../../Include/RmlUi/Core/DataVariable.h"
-#include "../../Include/RmlUi/Core/Element.h"
+#include "../../Include/RmlUi/Core/ElementDocument.h" // VaCuus patch #11: was Element.h, which this includes
 #include "../../Include/RmlUi/Core/ElementText.h"
 #include "../../Include/RmlUi/Core/Factory.h"
 #include "../../Include/RmlUi/Core/SystemInterface.h"
@@ -177,7 +177,7 @@ bool DataViewStyle::Update(DataModel& model)
 		// (ElementBackgroundBorder.cpp:131-137) -- measured at 100 published frames in 100
 		// (VaCuus.Model.View.DataStyleIdle). The layout-only case is absorbed downstream: an
 		// unchanged box never reaches OnResize, and ElementText reuses its compiled geometry
-		// when the regenerated mesh compares equal (ElementText.cpp:530-536).
+		// when the regenerated mesh compares equal (ElementText.cpp:541-547).
 		// ToString() re-appends the unit and maps a keyword back to its name
 		// (Property.cpp:12-20 -> PropertyDefinition::GetValue, PropertyDefinition.cpp:91-135),
 		// so this compares the incoming string against the string that produced the property.
@@ -186,7 +186,12 @@ bool DataViewStyle::Update(DataModel& model)
 		// authored spelling are simply unaffected -- colours other than lowercase #rrggbb
 		// (TypeConverter.cpp:267-273), and shorthands, which leave no local property under
 		// their own name at all: those compare unequal here exactly as they did before.
-		if (!p || p->ToString() != value)
+		if (value.empty()) // VaCuus patch #12 (VENDORED_TAG.txt): '' unsets the property, as CSSOM's style.x = '' does.
+		{
+			element->RemoveProperty(property_name);
+			result = (p != nullptr);
+		}
+		else if (!p || p->ToString() != value)
 		{
 			element->SetProperty(property_name, value);
 			result = true;
@@ -492,6 +497,13 @@ bool DataViewFor::Initialize(DataModel& model, Element* element, const String& i
 
 	if (iterator_index_name.empty())
 		iterator_index_name = "it_index";
+
+	// VaCuus patch #11 (VENDORED_TAG.txt): a top-level variable resolves before any alias (DataModel::ResolveAddress), so
+	// an alias it shadows is unreachable. Said once, HERE, where this template is placed in its document; each row's
+	// InsertAlias runs before the row is parented, with no address or document to name.
+	for (const String* alias : {&iterator_name, &iterator_index_name})
+		if (model.GetVariable(DataAddress{DataAddressEntry(*alias)}))
+			Log::Message(Log::LT_ERROR, "Alias '%s' on %s in '%s' is unreachable: the data model has a top-level variable of the same name, and every reference resolves to that first. Rename the alias.", alias->c_str(), element->GetAddress().c_str(), element->GetOwnerDocument() ? element->GetOwnerDocument()->GetSourceURL().c_str() : "<no document>");
 
 	const String& container_name = iterator_container_pair.back();
 

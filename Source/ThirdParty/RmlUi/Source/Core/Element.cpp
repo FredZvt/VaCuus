@@ -67,6 +67,8 @@ static float GetScrollOffsetDelta(ScrollAlignment alignment, float begin_offset,
 	return 0.f;
 }
 
+RMLUI_RTTI_Define(Element)
+
 Element::Element(const String& tag) :
 	local_stacking_context(false), local_stacking_context_forced(false), stacking_context_dirty(false), computed_values_are_default_initialized(true),
 	visible(true), offset_fixed(false), absolute_offset_dirty(true), rounded_main_padding_size_dirty(true), dirty_definition(false),
@@ -594,7 +596,7 @@ bool Element::SetProperty(const String& name, const String& value)
 	PropertyDictionary properties;
 	if (!StyleSheetSpecification::ParsePropertyDeclaration(properties, name, value))
 	{
-		Log::Message(Log::LT_WARNING, "Syntax error parsing inline property declaration '%s: %s;'.", name.c_str(), value.c_str());
+		Log::Message(Log::LT_WARNING, "Syntax error parsing inline property declaration '%s: %s;' on %s.", name.c_str(), value.c_str(), GetAddress().c_str()); // VaCuus patch #12
 		return false;
 	}
 	for (auto& property : properties.GetProperties())

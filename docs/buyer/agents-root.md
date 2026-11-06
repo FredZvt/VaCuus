@@ -35,13 +35,15 @@ project, read this page first and then
 ## Verify like this
 
 ```bash
-# the plugin's own suite -- ships with the package, no RHI needed
+# the plugin's own suite -- ships with the package, no RHI needed; exits by itself with a status
 <Engine>/Binaries/<Platform>/UnrealEditor-Cmd <Project>.uproject \
-  -ExecCmds="Automation RunTests VaCuus, Quit" -unattended -nullrhi -nosplash
+  -unattended -nullrhi -nosplash -ExecCmds="Automation RunTests VaCuus; Quit"
 ```
 
 `-ExecCmds` splits on **commas**, not semicolons, and swallows every argument to its
-right — put it last and end its value with a comma.
+right — put it last and end a console-command list with a comma. The one exception is the
+line above: `Automation` splits its OWN argument on `;`, and its own `Quit` exits once the
+run completes.
 [`docs/buyer/setup.md`](docs/buyer/setup.md) §4 has the rest of that pipeline.
 
 ## Where the answers are
@@ -50,7 +52,7 @@ right — put it last and end its value with a comma.
 | --- | --- |
 | How do I install it, host a document, ship it? | [`docs/buyer/setup.md`](docs/buyer/setup.md) |
 | Is this style supported? | [`docs/buyer/rcss-matrix.md`](docs/buyer/rcss-matrix.md) |
-| Why is this behaving strangely? | [`docs/buyer/gotchas.md`](docs/buyer/gotchas.md) — 26 numbered findings |
+| Why is this behaving strangely? | [`docs/buyer/gotchas.md`](docs/buyer/gotchas.md) — 27 numbered findings |
 | What does it cost, and what is the budget? | [`docs/buyer/perf-guide.md`](docs/buyer/perf-guide.md) |
 | How do I ship in more than one language? | [`docs/buyer/localization.md`](docs/buyer/localization.md) — and read it before the first non-Latin script |
 | The full agent briefing | [`docs/buyer/ai-guide.md`](docs/buyer/ai-guide.md) |

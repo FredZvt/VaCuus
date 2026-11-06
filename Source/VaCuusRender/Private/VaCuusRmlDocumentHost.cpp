@@ -211,7 +211,7 @@ void FVaCuusRmlDocumentHost::AdoptDocument(Rml::ElementDocument* NewDocument, co
 	// Return/Space all live in ElementDocument::ProcessDefaultAction, which only runs
 	// when the keydown was dispatched to something inside a document -- and
 	// Context::ProcessKeyDown falls back to the context ROOT when nothing holds focus
-	// (Context.cpp:533-537). The root is not an ElementDocument and has no default
+	// (Context.cpp:561-565). The root is not an ElementDocument and has no default
 	// action, so every arrow key would be silently swallowed.
 	//
 	// NOT FocusFlag::Auto (the library default), and that is a policy choice: Auto
@@ -229,7 +229,7 @@ void FVaCuusRmlDocumentHost::AdoptDocument(Rml::ElementDocument* NewDocument, co
 	// into the old context while it was still alive -- and after Show(), so the
 	// captured <head> scripts run against a shown, current document. HERE and
 	// never from Plugin::OnDocumentLoad: that hook fires inside
-	// Context::LoadDocument (Context.cpp:299), before this function even
+	// Context::LoadDocument (Context.cpp:296), before this function even
 	// regains control, while a replace's OLD context is still the view's --
 	// scripts executed there land in a context OnDocumentReady's recycle then
 	// frees, leaving JS silently dead after every reload (v1's recorded bug,
@@ -284,7 +284,7 @@ void FVaCuusRmlDocumentHost::CloseDocument()
 		// Context::UnloadDocument (ElementDocument.cpp:421-425), which moves the document
 		// into the context's `unloaded_documents` list; the elements, their compiled
 		// geometry and their textures are not freed until the context's next Update()
-		// reaches ReleaseUnloadedDocuments (Context.cpp:216-217). So a close with no
+		// reaches ReleaseUnloadedDocuments (Context.cpp:217-218). So a close with no
 		// further Update() leaks the whole document tree on both sides until
 		// Rml::RemoveContext.
 		Document->Close();
@@ -305,7 +305,7 @@ void FVaCuusRmlDocumentHost::CloseDocument()
 		// no draws behind it is what wipes the view.
 		//
 		// Before this flag existed, HasView() went false the moment Document did, the UI
-		// thread's record loop skipped this view for good (VaCuusUIThread.cpp:1160-1163), and
+		// thread's record loop skipped this view for good (VaCuusUIThread.cpp:1220-1223), and
 		// the player was left with a pixel-perfect ghost of a dead document: clicks fall
 		// through (the empty snapshot below), the cursor reverts, focus is released, and
 		// nothing dismisses it short of loading another document, hiding the widget or
@@ -320,7 +320,7 @@ void FVaCuusRmlDocumentHost::CloseDocument()
 		// NOW, not one frame later, or the game thread keeps answering Handled from the
 		// closed document's geometry for a frame. It is also the only retraction that
 		// survives the one path where the clearing frame cannot run -- an in-band Shutdown
-		// closes every document and then leaves the loop (VaCuusUIThread.cpp:1222-1236) --
+		// closes every document and then leaves the loop (VaCuusUIThread.cpp:1282-1296) --
 		// and there the render side is retracted by Shutdown()'s
 		// ReleaseResources_RenderThread instead, which drops the RT outright.
 		PublishEmptyInteractiveSnapshot();
@@ -360,7 +360,7 @@ void FVaCuusRmlDocumentHost::SetVisible(bool bVisible)
 	// the RT, because nothing would ever emit the empty frame that clears it. A hidden view
 	// therefore still pays a full Update() and a full record every frame; only the publish
 	// stops. It also stops claiming hit coverage without any extra work here, because the
-	// snapshot walk skips invisible elements (VaCuusInteractiveSnapshot.cpp:402-405).
+	// snapshot walk skips invisible elements (VaCuusInteractiveSnapshot.cpp:520-523).
 	if (bVisible)
 	{
 		// FocusFlag::Keep, not Document: Hide() ran UnfocusDocument() but left this
@@ -664,7 +664,7 @@ void FVaCuusRmlDocumentHost::RecordAndPublishFrame()
 	//
 	// REVEAL-FRAME SKEW, since RmlUi Patch #7 (Source/ThirdParty/RmlUi/VENDORED_TAG.txt): an element
 	// shown or created inside a transformed ancestor gets its transform_state in THIS frame's Render(),
-	// below, after this walk has already read it as null (VaCuusInteractiveSnapshot.cpp:432 gates the
+	// below, after this walk has already read it as null (VaCuusInteractiveSnapshot.cpp:547 gates the
 	// projected path on it). So on the reveal frame the snapshot hit-tests the element's untransformed
 	// rect and converges one frame later -- the same one-frame lag every transform property change has
 	// (OnPropertyChange dirties, Element.cpp:1962-1963; Render computes). Before the patch the element

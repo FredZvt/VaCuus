@@ -5,6 +5,7 @@
 #include "VaCuusModelLayout.h"
 #include "VaCuusModelLayoutTestTypes.h"
 #include "VaCuusModelShadow.h"
+#include "VaCuusTestLogCapture.h"
 
 #include "StructUtils/UserDefinedStruct.h"
 #include "UObject/Package.h" // complete UPackage for NewObject(GetTransientPackage()) — UObjectGlobals.h only forward-declares it
@@ -375,6 +376,43 @@ bool FVaCuusModelLayoutEmptyNestedTest::RunTest(const FString& Parameters)
 	// No orphan: a top-level name with no field behind it would be dirtied forever and
 	// resolve to nothing.
 	TestEqual(TEXT("no top-level name is left behind"), Layout.GetTopLevelNames().Num(), 1);
+
+	return true;
+}
+
+/**
+ * A MODEL THAT BINDS NOTHING MUST SAY WHICH MEMBERS IT SKIPPED (bead VaCuus-w87.3). The
+ * exposure skip is Verbose on purpose -- a struct with SOME unexposed members is the normal
+ * case and a per-member Warning would fire for every one of them on every model. But when NO
+ * member survives, the root Warning used to be the only line at default verbosity, and it
+ * sent the reader to per-property lines that were not in the log: the field report's lobby
+ * drew its raw {{Countdown}} template for an hour over exactly that.
+ *
+ * RESTORE-THE-BUG: drop the unexposed list from the root build's empty-layout Warning and the
+ * expectation below is unmet -- the Warning still fires, without the names.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusModelLayoutUnexposedTest, "VaCuus.Model.LayoutUnexposed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FVaCuusModelLayoutUnexposedTest::RunTest(const FString& Parameters)
+{
+	// One line, naming the members, the rule and the fix -- declaration order, so the list
+	// reads like the struct.
+	AddExpectedMessagePlain(TEXT("2 propert(ies) were skipped because they are exposed to neither Blueprint nor the details ")
+								TEXT("panel: Countdown, bReady"),
+		ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+
+	const FVaCuusModelLayout Layout(FVaCuusLayoutTestUnexposedModel::StaticStruct());
+
+	TestTrue(TEXT("the layout resolved its struct"), Layout.IsValid());
+	TestEqual(TEXT("nothing binds"), Layout.GetFields().Num(), 0);
+	if (TestEqual(TEXT("both members are recorded as unexposed"), Layout.GetUnexposedNames().Num(), 2))
+	{
+		TestTrue(TEXT("in declaration order, as authored"),
+			Layout.GetUnexposedNames()[0].Equals(TEXT("Countdown"), ESearchCase::CaseSensitive)
+				&& Layout.GetUnexposedNames()[1].Equals(TEXT("bReady"), ESearchCase::CaseSensitive));
+	}
+	TestEqual(TEXT("an unexposed member is a skip, not a refusal"), Layout.GetNumRefused(), 0);
 
 	return true;
 }
@@ -990,7 +1028,10 @@ bool FVaCuusModelLayoutArrayRefusalsTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(TEXT("array property 'Texts'"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("array property 'TextRows' (TArray) cannot be bound -- element member 'Label'"),
 		ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
-	AddExpectedMessagePlain(TEXT("array property 'NestedRows' (TArray) cannot be bound -- element member 'Inner'"),
+
+	// A container inside the element is refused ALONE (bead VaCuus-w87.4, owner decision
+	// 2026-10-06): the Warning names the outer array AND the member, and the array binds.
+	AddExpectedMessagePlain(TEXT("array property 'NestedRows' (TArray): element member 'Inner' (TArray) is not bound"),
 		ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 
 	// The row member named `Size`: the element layout is a plain layout, so the ROOT rule
@@ -1003,27 +1044,45 @@ bool FVaCuusModelLayoutArrayRefusalsTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(TEXT("property 'Lookup'"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("property 'Tags'"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 
-	// The zero-bindable row type: the Warning names the ARRAY property, not the row type --
-	// and no root-flavored "no property could be bound" line fires for the row (an
-	// unexpected Warning fails the test, so its absence is asserted by there being no
-	// expectation for it).
+	// The zero-bindable row type: the Warning names the ARRAY property, not the row type.
+	// The root-flavored "no property could be bound" line must not ALSO fire for the row --
+	// and that half is asserted by the capture below, not by the missing expectation: an
+	// unexpected Warning does NOT fail an automation test, it only becomes a Warning event
+	// (AutomationTest.cpp:128-136; bElevateLogWarningsToErrors defaults to false, :181).
 	AddExpectedMessagePlain(TEXT("array property 'BarrenRows'"), ELogVerbosity::Warning,
 		EAutomationExpectedMessageFlags::Contains, 1);
 
+	FVaCuusTestLogCapture LogCapture;
 	const FVaCuusModelLayout Layout(FVaCuusArrayRefusalModel::StaticStruct());
 	TestTrue(TEXT("the layout resolved its struct"), Layout.IsValid());
+	TestEqual(TEXT("no root-flavored 'no property could be bound' line fired for a row type"),
+		LogCapture.Count(TEXT("no property could be bound")), 0);
 
-	// Refused whole: Text elements, Text anywhere in the element subtree, a container
-	// anywhere in the element subtree, and a row type with nothing bindable in it.
+	// Refused whole: Text elements, Text anywhere in the element subtree, and a row type with
+	// nothing bindable in it.
 	TestNull(TEXT("TArray<FText> is refused"), Layout.FindField(TEXT("Texts")));
 	TestNull(TEXT("a row with an FText member is refused whole"), Layout.FindField(TEXT("TextRows")));
-	TestNull(TEXT("a row with a TArray member is refused whole"), Layout.FindField(TEXT("NestedRows")));
 	TestNull(TEXT("a row type with no bindable member is refused whole"), Layout.FindField(TEXT("BarrenRows")));
 
-	// Survivors: the scalar control and the two arrays whose offending MEMBERS -- not the
+	// Survivors: the scalar control and the three arrays whose offending MEMBERS -- not the
 	// arrays themselves -- were refused.
 	TestNotNull(TEXT("the scalar control survives"), Layout.FindField(TEXT("Kept")));
-	TestEqual(TEXT("exactly the three survivors bind"), Layout.GetFields().Num(), 3);
+	TestEqual(TEXT("exactly the four survivors bind"), Layout.GetFields().Num(), 4);
+
+	const FVaCuusModelField* NestedRows = Layout.FindField(TEXT("NestedRows"));
+	if (TestNotNull(TEXT("a row with a TArray member still binds its array (VaCuus-w87.4)"), NestedRows)
+		&& TestNotNull(TEXT("its desc exists"), NestedRows->ArrayDesc)
+		&& TestTrue(TEXT("with a struct element layout"), NestedRows->ArrayDesc->IsStructElement()))
+	{
+		TestNull(TEXT("the container member is absent from the element layout"),
+			NestedRows->ArrayDesc->ElementLayout->FindField(TEXT("Inner")));
+		TestNotNull(TEXT("and its sibling binds"), NestedRows->ArrayDesc->ElementLayout->FindField(TEXT("Kept")));
+	}
+
+	// THE COUNT THE BIND SUMMARY PRINTS (bead VaCuus-w87.3), so "N of N" can no longer read
+	// clean over a refusal: Texts, TextRows and BarrenRows refused whole; Inner, Size, Lookup
+	// and Tags refused inside their element layouts.
+	TestEqual(TEXT("seven properties were refused, element members included"), Layout.GetNumRefused(), 7);
 
 	const FVaCuusModelField* ReservedRows = Layout.FindField(TEXT("ReservedRows"));
 	if (TestNotNull(TEXT("a row member named Size does not refuse its array"), ReservedRows)
@@ -1072,8 +1131,12 @@ bool FVaCuusModelLayoutCycleTest::RunTest(const FString& Parameters)
 	using namespace VaCuusModelLayoutTest;
 
 	// ---- The mutual pair: A{TArray<B>} / B{TArray<A>}. The cycle closes one level down,
-	// so the OUTER array binds and the refusal lands inside the element layout. ----
-	AddExpectedMessagePlain(TEXT("array property 'As'"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+	// so the OUTER array binds and the refusal lands inside the element layout. Since bead
+	// VaCuus-w87.4 it is the CONTAINER rule that refuses `As` there, before the cycle guard is
+	// reached: an element build never builds an array desc at all, so no cycle can form
+	// through one. The guard still carries the by-value hop below, which closes on a ROOT. ----
+	AddExpectedMessagePlain(TEXT("element member 'As' (TArray) is not bound"), ELogVerbosity::Warning,
+		EAutomationExpectedMessageFlags::Contains, 1);
 
 	TStrongObjectPtr<UUserDefinedStruct> StructA(NewUserStruct());
 	TStrongObjectPtr<UUserDefinedStruct> StructB(NewUserStruct());

@@ -30,7 +30,7 @@ class DataModelHandle;
  * creates, which is what Bind() does.
  *
  * WHY IT UPDATES AT ALL, in one line of RmlUi: DataExpression::GetVariableNameList returns
- * `address[0].name` — the top-level name only (DataExpression.cpp:1145-1154) — and
+ * `address[0].name` — the top-level name only (DataExpression.cpp:1146-1155) — and
  * DataModel::Update drives views off that dirty-name set (DataModel.cpp:373-378). So a single
  * DirtyVariable("t") re-evaluates every `{{ t.* }}` in the model, and this rides the exact
  * path bound models already use (FVaCuusBoundModel::ApplyPendingUpdate).

@@ -24,6 +24,37 @@ struct FVaCuusUIQueues;
 struct FVaCuusViewStatus;
 
 /**
+ * "Where is the element with this id?" -- asked by the game thread, answered by the UI thread
+ * after the next frame's Context::Update(), so against the tree the player is about to see
+ * (bead VaCuus-w87.15). What vacuus.Click aims with instead of coordinates measured off a
+ * screenshot.
+ *
+ * SHARED, NOT RETURNED: the game thread never waits on the UI thread, so the asker keeps the
+ * other reference and polls State (acquire). ElementId is written before the enqueue and never
+ * again; Rect and bVisible are written by the UI thread before it stores State (release).
+ */
+struct FVaCuusElementBoundsQuery
+{
+	enum class EState : uint8
+	{
+		Pending,
+		Found,
+		Missing,
+	};
+
+	/** The element's id attribute, byte for byte (RmlUi's GetElementById is case-sensitive). */
+	FString ElementId;
+
+	std::atomic<EState> State{EState::Pending};
+
+	/** Border box in VIEW pixels, half-open like every snapshot rect. Valid once Found. */
+	FIntRect Rect;
+
+	/** RmlUi's visibility of the element and every ancestor. Valid once Found. */
+	bool bVisible = false;
+};
+
+/**
  * The dedicated VaCuus UI thread -- one per PROCESS, owned by FVaCuusModule.
  *
  * WHY ONE PER PROCESS (supersedes spec §4's original "one per UVaCuusSubsystem"):
@@ -148,7 +179,8 @@ public:
 		FIntPoint ViewSize = FIntPoint::ZeroValue);
 	void EnqueueLoadDocumentFromMemory(uint32 ViewId, const FString& RmlSource, uint64 LoadSerial, FIntPoint ViewSize = FIntPoint::ZeroValue);
 	void EnqueueCloseDocument(uint32 ViewId);
-	void EnqueueResize(uint32 ViewId, FIntPoint ViewSize);
+	/** DpRatio: physical pixels per `dp` for the view's context; 0 leaves the current ratio. */
+	void EnqueueResize(uint32 ViewId, FIntPoint ViewSize, float DpRatio = 0.0f);
 	void EnqueueSetVisible(uint32 ViewId, bool bVisible);
 
 	/**
@@ -228,6 +260,9 @@ public:
 	 * race every mutation the next frame makes.
 	 */
 	void EnqueueDumpNodeCount(uint32 ViewId);
+
+	/** See FVaCuusElementBoundsQuery. A query for a view that is gone is answered Missing. */
+	void EnqueueQueryElementBounds(uint32 ViewId, const TSharedRef<FVaCuusElementBoundsQuery>& Query);
 
 	/**
 	 * Drops RmlUi's parsed stylesheet and template caches on the UI thread. Live
@@ -514,6 +549,12 @@ private:
 	 * the reference held here is what carries each model to this ordered teardown point.
 	 */
 	TMap<uint32, TArray<TSharedRef<FVaCuusBoundModel>>> Models;
+
+	/** Element-bounds queries drained this frame, answered after the record loop. UI thread only. */
+	TArray<TPair<uint32, TSharedRef<FVaCuusElementBoundsQuery>>> PendingBoundsQueries;
+
+	/** Answers every pending query against the tree this frame just laid out, then empties the list. */
+	void AnswerBoundsQueries(bool bShuttingDown);
 
 	/** Game thread -> UI thread transport; allocated in the constructor, never null. */
 	TUniquePtr<FVaCuusUIQueues> Queues;

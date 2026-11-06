@@ -52,7 +52,7 @@
  *  - the loading-thread paint returns and still emits the view's custom element -- the composite
  *    is what a loading screen is for;
  *  - it queues no resize, although it paints at a different size -- the queue behind Resize()
- *    has one producer (VaCuusUIQueues.h:328-330);
+ *    has one producer (VaCuusUIQueues.h:345-347);
  *  - it leaves the OnPaint scope's last sample alone -- a game-thread budget row with one
  *    writing thread (VaCuusStats.cpp:82, :202-203);
  *  - the next GAME-thread paint of the same geometry sends that size and samples OnPaint -- the

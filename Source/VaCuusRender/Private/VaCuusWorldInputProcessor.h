@@ -58,7 +58,7 @@ struct FVaCuusWorldHitMath
 	 * has X = 0, VaCuusWorldComponent.cpp:99-102), UNBOUNDED: the result can be
 	 * outside [0, DrawSize), and that is the point. This is the latched-drag path's
 	 * analog of Slate handing a captor out-of-bounds local coordinates
-	 * (SVaCuusWidget.cpp:534-537's "a drag that started on a scrollbar must keep
+	 * (SVaCuusWidget.cpp:880-885's "a drag that started on a scrollbar must keep
 	 * being ours even after the pointer wanders off it") -- a box trace cannot
 	 * answer once the cursor leaves the quad, the plane always can.
 	 *
@@ -68,7 +68,7 @@ struct FVaCuusWorldHitMath
 	static bool RayToWidget(const FTransform& ComponentTransform, const FVector& RayOrigin, const FVector& RayDirection,
 		FIntPoint DrawSize, FVector2D Pivot, FVector2D& OutWidget);
 
-	/** FVector2D widget coords -> snapshot pixels: floored, not rounded, because a pixel spans [n, n+1) and so does FIntRect::Contains (SVaCuusWidget.cpp:381-388's convention). */
+	/** FVector2D widget coords -> snapshot pixels: floored, not rounded, because a pixel spans [n, n+1) and so does FIntRect::Contains (SVaCuusWidget.cpp:526-532's convention). */
 	static FIntPoint WidgetToPixel(FVector2D Widget)
 	{
 		return FIntPoint(FMath::FloorToInt(Widget.X), FMath::FloorToInt(Widget.Y));
@@ -140,10 +140,10 @@ struct FVaCuusPointerPress
  * AND NOTHING WOULD HAVE CAUGHT IT. The processor holds no Slate capture by design
  * (it consumes before routing), so the engine's touch net has nothing of ours to
  * release: FSlateUser::NotifyPointerReleased force-releases CAPTURE on every touch
- * end (SlateUser.cpp:1284-1290), which is what quietly saves SVaCuusWidget's
- * identically-shaped predicate (SVaCuusWidget.cpp:638) by driving its
- * OnMouseCaptureLost (SlateUser.cpp:314). And IInputProcessor offers no touch hook
- * and no capture-lost hook to fall back on -- its complete surface is
+ * end (SlateUser.cpp:1284-1290), which is what quietly saved SVaCuusWidget's
+ * identically-shaped predicate, before its capture became per finger, by driving
+ * its OnMouseCaptureLost (SlateUser.cpp:314). And IInputProcessor offers no touch
+ * hook and no capture-lost hook to fall back on -- its complete surface is
  * IInputProcessor.h:20-53.
  *
  * ENFORCEMENT BY SHAPE, and its exact limit. The held set is private and every
@@ -252,7 +252,7 @@ private:
  * thread).
  *
  * CONSUME = View->GetSnapshot().Contains(Pixel) -- the same one-frame-stale,
- * per-frame-stable answer the screen path gives Slate (VaCuusView.h:539-569);
+ * per-frame-stable answer the screen path gives Slate (VaCuusView.h:547-577);
  * pass-through is the absence of coverage, never an occluder
  * (VaCuusInteractiveSnapshot.h:259-265). Returning false hands the untouched event
  * to Slate, which routes it to the viewport and the game hears it.
@@ -281,13 +281,13 @@ private:
  * That bookkeeping is FVaCuusPointerLatch above, and its comment carries the whole
  * argument for why the release condition is a set of presses we saw rather than the
  * event's own button set. The behaviour it produces is still the widget's
- * (SVaCuusWidget.cpp:638): a second button pressed mid-drag keeps the drag, and only
+ * (SVaCuusWidget.cpp:1093-1103): a second button pressed mid-drag keeps the drag, and only
  * the last release ends it -- reached now by counting our own presses instead of by
  * trusting a field a touch event cannot populate.
  *
  * MOUSE LEAVE IS MANDATORY: when the ray leaves a hovered panel (trace miss, a
  * different panel, or the occlusion rule disengaging), MouseLeave is sent or
- * RmlUi's `:hover` sticks forever (SVaCuusWidget.cpp:705-711; Context.cpp:839-846).
+ * RmlUi's `:hover` sticks forever (SVaCuusWidget.cpp:1309-1321; Context.cpp:914-921).
  * Event-driven only: Slate's synthesized moves skip preprocessors
  * (SlateApplication.cpp:6399 gates on !bIsSynthetic), so a panel occluded UNDER a
  * motionless cursor un-hovers on the next real pointer event, not the same frame.

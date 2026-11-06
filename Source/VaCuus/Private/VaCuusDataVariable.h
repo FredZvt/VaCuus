@@ -36,7 +36,7 @@ class DataModelConstructor;
  *   DataModelHandle.h:65   bool BindCustomDataVariable(const String& name, DataVariable data_variable)
  *   DataVariable.h:23      DataVariable(VariableDefinition* definition, void* ptr)
  *
- * `VariableDefinition` (DataVariable.h:46-64) is a plain polymorphic class, NOT a
+ * `VariableDefinition` (DataVariable.h:46-73) is a plain polymorphic class, NOT a
  * template, whose Child() resolves a field BY STRING at run time; DataModel::BindVariable
  * validates only the name and the non-nullness of the definition
  * (DataModel.cpp:117-140). Family<T> and the whole DataTypeRegister are bypassed -- which
@@ -76,7 +76,7 @@ class DataModelConstructor;
  *
  * Both idioms are RmlUi's own -- StructDefinition::Child hands the parent's ptr down
  * unchanged (DataVariable.cpp:76-95) while ArrayDefinition::Child computes a new one
- * (DataVariable.h:143-163) -- so neither is a deviation.
+ * (DataVariable.h:152-172) -- so neither is a deviation.
  *
  *
  * WHY DERIVE FROM BasePointerDefinition RATHER THAN WRITE Get/Set BY HAND. Verified in
@@ -85,10 +85,10 @@ class DataModelConstructor;
  * forward through DereferencePointer (:138-164), and ReflectMemberNames forwards as-is
  * (:166-169). So one 3-line override gets correct behaviour for a scalar leaf and would
  * get it for a struct member too. RmlUi's own MemberObjectDefinition is exactly this
- * (DataVariable.h:196-208).
+ * (DataVariable.h:205-217).
  *
  * StructDefinition and ArrayDefinition cannot be reused the same way: both are `final`
- * (DataVariable.h:119, :134).
+ * (DataVariable.h:128, :143).
  */
 
 class FProperty;
@@ -124,7 +124,7 @@ public:
 	/**
 	 * `data-for` over a leaf. RmlUi's base Size() already answers this correctly -- warn,
 	 * return 0, iterate no rows (DataVariable.cpp:40-44, reached with no Type() check from
-	 * DataViewFor::Update, DataViewDefault.cpp:498-503) -- but its warning names nothing.
+	 * DataViewFor::Update, DataViewDefault.cpp:510-515) -- but its warning names nothing.
 	 * Same contract, named: one latched Warning carrying DiagnosticPath, then 0 (spec 3.5).
 	 */
 	virtual int Size(void* InValuePtr) override;
@@ -395,6 +395,14 @@ private:
  *
  * IT IS CLEARED IN EXACTLY ONE PLACE, FVaCuusUIThread::Exit(), through ReleaseAll(). See
  * that function for why leaving it to static destruction is not an option.
+ *
+ * KEYED ON THE STRUCT AND ON ONE BIT OF POLICY (bead VaCuus-w87.4). An element layout drops
+ * a container member that the same type's ROOT layout binds, so the two can differ -- and a
+ * set built from one handed to the other is either a root missing its array (a silent miss)
+ * or a row exposing an array nobody diffs (a stale one). The bit is
+ * FVaCuusModelLayout::HasPrunedContainers(): true only when an element build actually
+ * dropped something, so a row type with no container still shares ONE set between its root
+ * and element uses, as VaCuus.Model.ArrayBinding's cache-hit assertion requires.
  */
 class FVaCuusDefinitionRegistry
 {
@@ -471,7 +479,7 @@ int32 BindModelVariables(Rml::DataModelConstructor& Constructor, const FVaCuusMo
  *
  * Refusing is clean because BOTH RmlUi call sites skip their DirtyVariable when Set
  * returns false -- verified at DataControllerDefault.cpp:57-59 and
- * DataExpression.cpp:1185-1197, which are the only two.
+ * DataExpression.cpp:1186-1198, which are the only two.
  *
  * The refusal LOGS ONCE PER FIELD, so the log alone cannot be asserted twice in one
  * process; this counter is the durable observable, and an invariant with no observable

@@ -157,10 +157,16 @@ cd /w/Unreal/UnrealEngine && ./Engine/Build/BatchFiles/Linux/Build.sh \
 - **No editor may be running while you build** — it holds the `.so`. Check `pgrep -a UnrealEditor`
   and kill **by PID**. Never `pkill -f <pattern>`: the pattern matches your own bash wrapper and
   kills your shell.
-- **`-ExecCmds` splits on COMMAS, not semicolons.** A recipe written with `;` runs as one
-  malformed command and silently does nothing — no "not recognized" line anywhere.
-- **The editor often does not exit** after `Automation RunTests …, Quit`: `Quit` is dispatched at
-  frame 0, deferred, and never fires. Kill by PID once `Sending StopTestSession` appears.
+- **`-ExecCmds` splits on COMMAS, not semicolons.** A recipe of console commands written with `;`
+  runs as one malformed command and silently does nothing — no "not recognized" line anywhere.
+  (`Automation` is the one exception — next bullet.)
+- **Quit an automation run through `Automation`, not beside it: `-ExecCmds="Automation RunTests X; Quit"`.**
+  `Automation` splits its OWN argument on `;` (AutomationCommandline.cpp:582) and its own `Quit`
+  (:726) exits once the run completes, with the exit code set from the results (:490-504). The
+  comma form `…, Quit` makes `Quit` a separate console command dispatched at frame 0, which is
+  deferred and never fires — the editor then idles until killed. Measured 2026-10-06 (bead
+  VaCuus-w87.7): `; Quit` exited by itself in 23 s with code 0; `, Quit` finished the test in 5 s
+  and hung until a 150 s timeout. Kill by PID only if a run is genuinely stuck.
 - **Read test counts from `Saved/Logs/VcHost.log`**, not stdout — an interleaved `UnrealTraceServer`
   fork clobbers the tail of every run.
 - **`-resx`/`-resy` are ignored offscreen without `-ForceRes`** (you get 888×500).
@@ -192,8 +198,8 @@ work**: Slate demands a synchronous Handled/Unhandled answer about geometry that
 thread, and the snapshot is that answer, cached once per frame so every handler in a frame sees one
 stable picture.
 
-**Modules:** `VaCuusRml` (vendored library) · `VaCuus` (UI thread, VFS, subsystem, view, snapshot,
-input mapping, IME) · `VaCuusRender` (recorder, replayer, Slate element, UMG widget) ·
+**Modules:** `VaCuusRml` (vendored library), `VaCuus` (UI thread, VFS, subsystem, view, snapshot,
+input mapping, IME), `VaCuusRender` (recorder, replayer, Slate element, UMG widget),
 `VaCuusEditor` (live reload).
 
 ## Conventions & Patterns

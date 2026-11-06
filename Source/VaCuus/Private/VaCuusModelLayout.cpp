@@ -581,7 +581,9 @@ FVaCuusModelLayout::FVaCuusModelLayout(const UScriptStruct* InStruct)
 	Build(InStruct, BuildStack);
 }
 
-FVaCuusModelLayout::FVaCuusModelLayout(const UScriptStruct* InStruct, TArray<const UScriptStruct*>& BuildStack)
+FVaCuusModelLayout::FVaCuusModelLayout(
+	const UScriptStruct* InStruct, TArray<const UScriptStruct*>& BuildStack, FString InElementContext)
+	: ElementContext(MoveTemp(InElementContext))
 {
 	Build(InStruct, BuildStack);
 }
@@ -634,11 +636,32 @@ void FVaCuusModelLayout::Build(const UScriptStruct* InStruct, TArray<const UScri
 	// this model" is false -- the document resolves against the ARRAY, whose desc build
 	// refuses the field with a Warning naming the array property (the one diagnostic that
 	// case gets).
+	//
+	// AND IT NAMES WHAT IT SKIPPED (bead VaCuus-w87.3). The exposure skips are Verbose, so
+	// before this the line pointed at "per-property lines" that a default log does not carry --
+	// the field report's lobby drew its raw {{Countdown}} template for an hour over it. Refusals
+	// need no list here: each already logged its own Warning or Error.
 	if (Fields.IsEmpty() && bRootBuild)
 	{
+		FString Skipped;
+		if (!UnexposedNames.IsEmpty())
+		{
+			// Capped, so a forty-member struct still yields a readable line.
+			constexpr int32 MaxListed = 8;
+			const int32 NumListed = FMath::Min(UnexposedNames.Num(), MaxListed);
+			FString List = FString::Join(TArrayView<const FString>(UnexposedNames.GetData(), NumListed), TEXT(", "));
+			if (UnexposedNames.Num() > NumListed)
+			{
+				List += FString::Printf(TEXT(", and %d more"), UnexposedNames.Num() - NumListed);
+			}
+			Skipped = FString::Printf(TEXT(". %d propert(ies) were skipped because they are exposed to neither Blueprint nor the ")
+										  TEXT("details panel: %s -- mark them BlueprintReadOnly (or EditAnywhere) to bind them"),
+				UnexposedNames.Num(), *List);
+		}
+
 		UE_LOG(LogVaCuus, Warning,
-			TEXT("VaCuus model '%s': no property could be bound; the document will resolve nothing against this model"),
-			*InStruct->GetName());
+			TEXT("VaCuus model '%s': no property could be bound; the document will resolve nothing against this model%s"),
+			*InStruct->GetName(), *Skipped);
 	}
 }
 
@@ -725,6 +748,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 		{
 			UE_LOG(LogVaCuus, Verbose, TEXT("VaCuus model '%s': '%s%s' is exposed to neither Blueprint nor the details panel"),
 				*ModelName, *Prefix, *Property->GetAuthoredName());
+			UnexposedNames.Add(Prefix + Property->GetAuthoredName());
 			continue;
 		}
 
@@ -745,6 +769,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				TEXT("VaCuus model '%s': property '%s%s' (%s) cannot be bound -- a fixed-size array (ArrayDim %d) is one "
 					 "property with many values and cannot be Blueprint-exposed; use a TArray, which binds"),
 				*ModelName, *Prefix, *Property->GetAuthoredName(), *Property->GetCPPType(), Property->ArrayDim);
+			++NumRefused;
 			continue;
 		}
 
@@ -770,6 +795,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 			// names the model, the property and the rule.
 			UE_LOG(LogVaCuus, Error, TEXT("VaCuus model '%s': property '%s' cannot be bound under the name '%s%s' -- %s"),
 				*ModelName, *Property->GetName(), *Prefix, *AuthoredName, NameError);
+			++NumRefused;
 			continue;
 		}
 
@@ -790,6 +816,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				TEXT("VaCuus model '%s': property '%s' cannot be bound under the name '%s' -- that name is already taken by "
 					 "another property"),
 				*ModelName, *Property->GetName(), *WireName);
+			++NumRefused;
 			continue;
 		}
 
@@ -801,6 +828,31 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 		// while leaf count is fixed at build time (spec 3.1).
 		if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 		{
+			// A CONTAINER INSIDE AN ARRAY ELEMENT IS REFUSED ALONE (bead VaCuus-w87.4, owner
+			// decision 2026-10-06). Dirtiness is one bit per TOP-LEVEL array, so an inner
+			// array's changes would hide under its owner's bit and its cost would be invisible;
+			// it is not bound. Until this decision the owning array was refused WHOLE for it,
+			// and the field report's chest rendered an empty card row under a clean bind
+			// summary. Dropping only the member is safe by the same argument that covers an
+			// unexposed member: it has no leaf, so nothing reads or diffs it, and SyncCopy's
+			// whole-row copy carries it inert (the desc-build scan's comment below).
+			//
+			// Here, at the source, rather than as a post-build scan: an element build then
+			// never constructs an array desc at all, so no container cycle can form through an
+			// element either -- the cycle guard below is reached by root builds only.
+			if (!ElementContext.IsEmpty())
+			{
+				UE_LOG(LogVaCuus, Warning,
+					TEXT("%s: element member '%s' (%s) is not bound -- a container inside an array element is not supported, ")
+						TEXT("because dirtiness is one bit per top-level array and the inner one's changes would be invisible ")
+						TEXT("under it. The rest of the row binds. To show it, flatten it into a top-level array (one list ")
+						TEXT("whose entries carry their row's index, filtered with data-if inside the row loop)"),
+					*ElementContext, *WireName, *Property->GetCPPType());
+				++NumRefused;
+				bContainersPruned = true;
+				continue;
+			}
+
 			FVaCuusModelArrayDesc Desc;
 			Desc.ArrayProperty = ArrayProperty;
 			Desc.Inner = ArrayProperty->Inner;
@@ -811,6 +863,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				{
 					UE_LOG(LogVaCuus, Warning, TEXT("VaCuus model '%s': array property '%s' has no element type; skipped"),
 						*ModelName, *WireName);
+					++NumRefused;
 					continue;
 				}
 
@@ -845,6 +898,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 							 "a container cycle (%s), which a flat layout cannot terminate; break the cycle or bind a "
 							 "different type"),
 						*ModelName, *WireName, *Property->GetCPPType(), *InnerStruct->Struct->GetName(), *Cycle);
+					++NumRefused;
 					continue;
 				}
 
@@ -856,8 +910,15 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				// `Size` is refused with the root Error, and the fix is a rename -- while what
 				// a shared layout cannot refuse, the scan below refuses on the ARRAY FIELD.
 				// Plain `new`, not MakeUnique, only because the stack-sharing constructor is
-				// private and MakeUnique is not a friend.
-				Desc.ElementLayout = TUniquePtr<FVaCuusModelLayout>(new FVaCuusModelLayout(InnerStruct->Struct, BuildStack));
+				// private and MakeUnique is not a friend. The context string is what the element
+				// build's own refusals name, so a row member's Warning leads back to this array.
+				Desc.ElementLayout = TUniquePtr<FVaCuusModelLayout>(new FVaCuusModelLayout(InnerStruct->Struct, BuildStack,
+					FString::Printf(TEXT("VaCuus model '%s': array property '%s' (%s)"), *ModelName, *WireName,
+						*Property->GetCPPType())));
+
+				// The row's own refusals count toward this model's, whatever happens to the
+				// array below: each one already logged a line the reader will see.
+				NumRefused += Desc.ElementLayout->GetNumRefused();
 
 				// A ROW TYPE WITH NOTHING TO BIND refuses the array too. With zero element
 				// leaves the only observable left is Num(), so the binding would render row
@@ -867,24 +928,32 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				// Warning, naming the ARRAY property, is the one diagnostic.
 				if (Desc.ElementLayout->GetFields().IsEmpty())
 				{
+					// The row's unexposed members are the likely reason, and its own build is an
+					// element build, which never says so itself.
+					const FString Unexposed = Desc.ElementLayout->GetUnexposedNames().IsEmpty()
+						? FString()
+						: FString::Printf(TEXT(" (unexposed: %s)"), *FString::Join(Desc.ElementLayout->GetUnexposedNames(), TEXT(", ")));
 					UE_LOG(LogVaCuus, Warning,
 						TEXT("VaCuus model '%s': array property '%s' (%s) cannot be bound -- row type '%s' has no bindable "
-							 "member, so only the element count could ever reach a document; expose a member of the row type"),
-						*ModelName, *WireName, *Property->GetCPPType(), *InnerStruct->Struct->GetName());
+							 "member, so only the element count could ever reach a document; expose a member of the row type%s"),
+						*ModelName, *WireName, *Property->GetCPPType(), *InnerStruct->Struct->GetName(), *Unexposed);
+					++NumRefused;
 					continue;
 				}
 
 				// THE DESC-BUILD SCAN, over the element layout's flat leaf list: every BINDABLE
 				// leaf within MaxNestingDepth of the element type, which is exactly the set the
-				// binding will ever read. Two kinds refuse the whole array field:
+				// binding will ever read. One kind refuses the whole array field:
 				//
 				//  - Text, ANYWHERE in the subtree: M3a's Text contract -- shadow and compare
 				//    the display string -- is a per-field projection at StoreField
 				//    (VaCuusModelSampler.cpp) that a whole-container copy bypasses, and an
 				//    unprojected FText in the UI shadow would resolve localization on the UI
 				//    thread, the exact race the sampler pins to the game thread.
-				//  - Array, i.e. a nested container: dirtiness is one bit per TOP-LEVEL array,
-				//    so an inner array's cost would multiply invisibly under a single bit.
+				//
+				// A nested container used to be the second kind. It no longer reaches this scan:
+				// the element build refuses it as a MEMBER (the interception above, bead
+				// VaCuus-w87.4), so an element layout never holds an Array leaf.
 				//
 				// WHAT THE SCAN CANNOT SEE RIDES ALONG INERT, and that is safe by shape, not by
 				// luck. A member that is unexposed, deprecated, editor-only, illegally named or
@@ -905,18 +974,12 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				const TCHAR* OffenceReason = nullptr;
 				for (const FVaCuusModelField& Leaf : Desc.ElementLayout->GetFields())
 				{
+					checkSlow(Leaf.Kind != EVaCuusFieldKind::Array);
 					if (Leaf.Kind == EVaCuusFieldKind::Text)
 					{
 						Offender = &Leaf;
 						OffenceReason = TEXT("an FText, whose display-string projection is per field and would be bypassed by a "
 											 "whole-array copy; project it to an FString on the game side");
-						break;
-					}
-					if (Leaf.Kind == EVaCuusFieldKind::Array)
-					{
-						Offender = &Leaf;
-						OffenceReason = TEXT("itself a container, and dirtiness is one bit per top-level array, so an inner "
-											 "array's cost would be invisible under it");
 						break;
 					}
 				}
@@ -925,6 +988,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 					UE_LOG(LogVaCuus, Warning,
 						TEXT("VaCuus model '%s': array property '%s' (%s) cannot be bound -- element member '%s' is %s"),
 						*ModelName, *WireName, *Property->GetCPPType(), *Offender->WireName, OffenceReason);
+					++NumRefused;
 					continue;
 				}
 			}
@@ -940,6 +1004,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 					UE_LOG(LogVaCuus, Warning,
 						TEXT("VaCuus model '%s': array property '%s' (%s) cannot be bound -- its element type cannot be: %s"),
 						*ModelName, *WireName, *Property->GetCPPType(), ElementReason);
+					++NumRefused;
 					continue;
 				}
 
@@ -953,6 +1018,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 							 "per-field display-string projection and resolve localization on the UI thread; project to FString "
 							 "on the game side"),
 						*ModelName, *WireName, *Property->GetCPPType());
+					++NumRefused;
 					continue;
 				}
 
@@ -979,6 +1045,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 			{
 				UE_LOG(LogVaCuus, Warning, TEXT("VaCuus model '%s': struct property '%s' has no type; skipped"), *ModelName,
 					*WireName);
+				++NumRefused;
 				continue;
 			}
 
@@ -987,6 +1054,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 				UE_LOG(LogVaCuus, Warning,
 					TEXT("VaCuus model '%s': nested struct property '%s' is deeper than the %d-level binding limit; skipped"),
 					*ModelName, *WireName, MaxNestingDepth);
+				++NumRefused;
 				continue;
 			}
 
@@ -1033,6 +1101,7 @@ void FVaCuusModelLayout::BuildLevel(const UScriptStruct* InStruct, const FString
 		{
 			UE_LOG(LogVaCuus, Warning, TEXT("VaCuus model '%s': property '%s' (%s) cannot be bound -- %s"), *ModelName,
 				*WireName, *Property->GetCPPType(), Reason);
+			++NumRefused;
 			continue;
 		}
 

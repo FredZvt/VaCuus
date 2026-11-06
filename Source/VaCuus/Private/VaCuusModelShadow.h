@@ -39,7 +39,7 @@ class UScriptStruct;
  * each sync rewrites its elements in place (FVaCuusModelArrayDesc::SyncCopy),
  * allocation-free only where the existing element and container capacity absorb the
  * content -- the grow-only reuse rule (ReallocForCopy, Array.h:710-751, `NewMax >
- * PrevMax`) and its shrink caveat live on SyncCopy (VaCuusModelLayout.cpp:27-52), and
+ * PrevMax`) and its shrink caveat live on SyncCopy (VaCuusModelLayout.cpp:33-58), and
  * spec 9's counting allocator is what holds "capacity absorbs it" to account.
  *
  *

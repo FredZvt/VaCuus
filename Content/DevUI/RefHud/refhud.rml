@@ -122,7 +122,7 @@
 	     independent-dirty-scope design this document exists to prove. Each row
 	     is 19 nodes and 8 bindings: rank, name, K, D, A, score, ping text, ping
 	     meter width. The data-for row is the hidden template (display:none,
-	     DataViewDefault.cpp:474): excluded from the count, cloned 24 times. -->
+	     DataViewDefault.cpp:479): excluded from the count, cloned 24 times. -->
 	<div id="sb-alpha" class="sb-panel">
 		<div class="sb-row sb-head"><span class="sb-rank">ALPHA</span><div class="sb-avatar"/><div class="sb-class"/><span class="sb-name">OPERATIVE</span><span class="sb-stat">K</span><span class="sb-stat">D</span><span class="sb-stat">A</span><span class="sb-score">SCORE</span><span class="sb-ping">PING</span><div class="sb-ping-track"/><div class="sb-ping-fill"/></div>
 		<div class="sb-row" data-for="row : TeamAlpha"><span class="sb-rank">{{row.Rank}}</span><div class="sb-avatar"/><div class="sb-class"/><span class="sb-name">{{row.Name}}</span><span class="sb-stat">{{row.Kills}}</span><span class="sb-stat">{{row.Deaths}}</span><span class="sb-stat">{{row.Assists}}</span><span class="sb-score">{{row.Score}}</span><span class="sb-ping">{{row.Ping}}</span><div class="sb-ping-track"/><div class="sb-ping-fill" data-style-width="row.Ping * 0.3 + 'px'"/></div>

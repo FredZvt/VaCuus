@@ -1305,7 +1305,7 @@ Vector2f WidgetTextInput::FormatText(float height_constraint)
 			if (count > 0)
 			{
 				line_content.append(count, ' ');
-				line_width += ElementUtilities::GetStringWidth(text_element, " ") * (int)count;
+				line_width = (float)ElementUtilities::GetStringWidth(text_element, line_content); // VaCuus patch #15 (VENDORED_TAG.txt)
 				line.editable_length += (int)count;
 				line.size += (int)count;
 				// Consume the hard wrap if we have one on this line, so that it doesn't make its own, empty line.
@@ -1432,13 +1432,11 @@ void WidgetTextInput::GenerateCursor()
 	cursor_size.x = Math::Round(ElementUtilities::GetDensityIndependentPixelRatio(text_element));
 	cursor_size.y = GetLineHeight();
 
-	Colourb color = parent->GetComputedValues().color();
-
-	if (const Property* property = parent->GetProperty(PropertyId::CaretColor))
-	{
-		if (property->unit == Unit::COLOUR)
-			color = property->Get<Colourb>();
-	}
+	Colourb color;
+	if (const Property* property = parent->GetProperty(PropertyId::CaretColor); property && property->unit == Unit::COLOUR)
+		color = property->Get<Colourb>();
+	else
+		color = parent->GetComputedValues().color();
 
 	Mesh mesh = cursor_geometry.Release(Geometry::ReleaseMode::ClearMesh);
 	MeshUtilities::GenerateQuad(mesh, Vector2f(0, 0), cursor_size, color.ToPremultiplied());

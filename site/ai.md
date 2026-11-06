@@ -91,7 +91,7 @@ wrong frame.
 
 ### 4. A suite that clears the plugin before it blames itself
 
-The 260-test automation suite ships **in the package** — test source and fixtures, on
+The 296-test automation suite ships **in the package** — test source and fixtures, on
 purpose — and needs no RHI:
 
 ```bash
@@ -110,7 +110,7 @@ eliminate one on its own is a much cheaper agent to supervise.
 | `AGENTS.md` at the package root | The front door. Five things that would otherwise cost the session, the verify command, and a table of where the answers are. Agents find it without being told. |
 | [`docs/buyer/ai-guide.md`](/docs/ai-guide) | The full briefing: the three RCSS failure modes, where files go, how to host a document, how to know it worked, and **Rules for an agent**. |
 | [`docs/buyer/rcss-matrix.md`](/docs/rcss-matrix) | The generated surface, above. |
-| [`docs/buyer/gotchas.md`](/docs/gotchas) | 26 numbered recorded findings — symptom, cause with the source that proves it, what to do. Every one is a finding from building the plugin's own demos, none is speculative. |
+| [`docs/buyer/gotchas.md`](/docs/gotchas) | 27 numbered recorded findings — symptom, cause with the source that proves it, what to do. Every one is a finding from building the plugin's own demos, none is speculative. |
 | [`docs/buyer/perf-guide.md`](/docs/perf-guide) | Measured budgets, so an optimisation pass has a target instead of an opinion. |
 
 The "Rules for an agent" section is the part worth quoting, because it is written at the
@@ -167,7 +167,7 @@ That is precisely why the shipped documentation exists in the shape it does: the
 enumerated, numbered, and attributed to the source line that causes them, so the agent can
 look the answer up instead of deriving it from a screen it cannot see.
 
-VaCuus is **released (1.0.3)** and its API is stable — breaking changes are reserved for
+VaCuus is **released (1.3.1)** and its API is stable — breaking changes are reserved for
 major versions and carry release notes.
 If your agent is going to write your UI, read [the full agent guide](/docs/ai-guide) and
 [the gotchas](/docs/gotchas) before you decide; both are the same text that ships in the

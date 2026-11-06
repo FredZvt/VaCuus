@@ -159,6 +159,14 @@ two RmlUi extensions. The control run that settles the resolution rule: from a
 subdirectory sheet, a bare `Michroma-Regular.ttf` gave
 `Failed to open file 'Michroma-Regular.ttf' (resolved to …/Content/DevUI/Michroma-Regular.ttf)`.
 
+**`font-weight: bold` over LatoLatin draws REGULAR — the plugin ships one face.** RmlUi
+picks the nearest weight a family has and never fakes a bold
+(`FontEngineDefault/FontFamily.cpp:23-46`), so every bold rule over the plugin's font
+renders regular. It used to say nothing; it now logs one Warning per family, style and
+weight it had to substitute: `Font family 'latolatin' has no normal face of weight 700;
+drawing its weight 400 face instead.` For real bold, add a bold face under your family's
+name with `@font-face` (`font-weight: bold`) as above.
+
 **Variable fonts render at their default weight for every weight you ask for.** The
 default font engine calls `FT_New_Face` and never sets a variation axis, so one variable
 file cannot serve `font-weight: 400` and `700` differently — you get the default
@@ -217,8 +225,10 @@ screenful. Only `transform` disabled clipping outright.
 The replayer now attaches a stencil target to the replay pass and honours both commands
 (`Source/VaCuusRender/Private/VaCuusReplayRenderer.cpp`, `EnableClipMask` /
 `RenderToClipMask`). `transform: scale()` on a root wrapper — the cheap way to author
-against a fixed 1920×1080 surface here, because there is no `calc()` and `dp == px` — no
-longer costs you every scroll container in the document.
+against a fixed 1920×1080 surface here, because there is no `calc()` — no longer costs you
+every scroll container in the document. (After 1.0.3, `dp` follows the DPI
+curve — setup.md §2, "Binding and input rules", rule 6 — so authoring in `dp` is the other
+way to keep sizes resolution-independent, with no wrapper at all.)
 
 **What it costs, since it is not free.** The stencil is allocated **lazily**: a view whose
 document never takes the mask path never allocates one, and `stat vacuus`'s *Clip Mask
@@ -256,11 +266,11 @@ that buffer is then faded, so a child at `opacity: 1` inside a parent at `0.5` r
 (`Source/ThirdParty/RmlUi/Source/Core/StyleSheetSpecification.cpp:351`,
 `inherited = true`) that each element multiplies into its own colours at paint time —
 background and borders at `ElementBackgroundBorder.cpp:166-173`, text at
-`ElementText.cpp:371-374`, every gradient and shader decorator at `DecoratorGradient.cpp:140`,
+`ElementText.cpp:382-385`, every gradient and shader decorator at `DecoratorGradient.cpp:140`,
 `:265`, `:434`, `:631` and `DecoratorShader.cpp:42`. Inheritance means *copy*, not
 *compose*: `ComputeValues` copies the parent's inherited block wholesale
 (`ComputedValues.h:394`, `inherited = parent.inherited`) and a local declaration then
-**overwrites** it (`ElementStyle.cpp:1247`, `values.opacity(p->Get<float>())`). Nothing
+**overwrites** it (`ElementStyle.cpp:1250`, `values.opacity(p->Get<float>())`). Nothing
 anywhere multiplies the two together.
 Do, and the right answer differs by what the child is:
 - **Do not redeclare `opacity` on a descendant** if any ancestor animates or toggles its
@@ -329,7 +339,7 @@ but each surprise costs less read here first:
 
 *Plain `drag: drag` gives you no drop events at all.* Of the five RCSS `drag` values,
 only `drag-drop` and `clone` enable `dragover`/`dragout`/`dragdrop`/`dragmove`
-(`Source/ThirdParty/RmlUi/Source/Core/Context.cpp:692` sets `drag_verbose` for exactly
+(`Source/ThirdParty/RmlUi/Source/Core/Context.cpp:767` sets `drag_verbose` for exactly
 those two); with `drag` you get `dragstart`/`drag`/`dragend` and nothing else, silently.
 The failure mode is a drag that visibly starts and can never land.
 
@@ -338,11 +348,11 @@ element is not in the event.* RmlUi passes the source as the `drag_element` void
 the JS bridge deliberately drops with the other non-convertible variants
 (`Source/VaCuusJs/Private/VaCuusJsEvents.cpp:44-49`). Capture the source yourself in
 `dragstart`; that variable is the only reliable handle. The release order over a target
-is `dragdrop` → `dragout` → `dragend` (`Context.cpp:760-775`), and `dragend` fires on
+is `dragdrop` → `dragout` → `dragend` (`Context.cpp:835-850`), and `dragend` fires on
 the source even when the drop landed on nothing — make it your cleanup point.
 
 *Nothing highlights a drop target for you.* The library's single drag pseudo-class is
-`:drag`, set on the ghost clone only (`Context.cpp:1504`); sources and targets get no
+`:drag`, set on the ghost clone only (`Context.cpp:1978`); sources and targets get no
 state at all, and ordinary `:hover` keeps firing on targets mid-drag. Target feedback is
 therefore your handler's job (the demo adds `drop-ok`/`drop-bad` classes from
 `dragover`). Note the events are dispatched per element entering or leaving the
@@ -354,16 +364,15 @@ which lands on the occupant and reaches the slot only by bubbling.
 through `RemoveChild`, the detach reaches `Context::OnElementDetach`, and its drag branch
 SILENTLY cancels the drag — `dragend` never fires and whatever cleanup you hung on it
 never runs (`Source/ThirdParty/RmlUi/Source/Core/Element.cpp:2129-2133` →
-`Context.cpp:1150-1159`). Validate in `dragdrop`, apply the move in `dragend`, where the
+`Context.cpp:1577-1586`). Validate in `dragdrop`, apply the move in `dragend`, where the
 same cancellation has nothing left to kill. The demo's header carries the full argument.
 
-Two smaller facts worth knowing before they are questions: there is no movement
-threshold — `dragstart` fires on the first ≥ 1 px move with button 0 held
-(`Context.cpp:1290`) — and a drag by touch is the same machinery, because the touch
-verbs synthesize button-0 mouse events (`Context.cpp:916-919`). A drag whose cursor
-leaves every interactive rect keeps working because the widget holds Slate pointer
-capture from the press; that is `SVaCuusWidget`'s capture gate, not the snapshot, and it
-is what makes dragging between two panels across empty screen possible.
+Mouse and primary-touch drags start on the first ≥ 1 px move. Secondary fingers
+start a drag after moving beyond 3 density-independent pixels; each keeps its own
+`touch_id`, drag target and clone. The physical mouse and first finger have separate
+press and hover state. A drag keeps working across empty screen because Slate captures
+that pointer from its press. Clone copies are rendered outside the document tree and
+never become interactive snapshot regions.
 
 **25. A loading screen built on VaCuus shows nothing while the level loads.**
 Symptom: a `UVaCuusWidget` inside the engine's stock loading screen — handed to the movie
@@ -404,7 +413,7 @@ if (const UGameEngine* GameEngine = Cast<UGameEngine>(GEngine))
 
 The game viewport is no substitute: at the session's first load neither
 `UGameViewportClient::GetViewportSize` nor `UGameViewportClient::GetWindow()` gave a size there.
-Queued commands wake the UI thread by themselves (`Source/VaCuus/Private/VaCuusUIThread.cpp:924-925`),
+Queued commands wake the UI thread by themselves (`Source/VaCuus/Private/VaCuusUIThread.cpp:980-981`),
 so the document is laid out and drawn during the load. What stays still is everything the game
 drives: the per-frame pulse is `UVaCuusSubsystem::Tick` → `PublishAndPulse`
 (`Source/VaCuus/Private/VaCuusSubsystem.cpp:262`), which does not run inside `LoadMap`, so model
@@ -422,7 +431,7 @@ code needs the guard whether or not the plugin has one. Use `IsInGameThread()`, 
 the reason that outlives your editor build: in Development the view's assertion catches you,
 but `check()` compiles out in Shipping (`Source/VaCuus/Private/VaCuusView.cpp:328`), and what
 is left is a second producer on a single-producer command queue
-(`Source/VaCuus/Private/VaCuusUIQueues.h:328-330`): a corrupted queue with no assertion and —
+(`Source/VaCuus/Private/VaCuusUIQueues.h:338-340`): a corrupted queue with no assertion and —
 unlike #14 — no log line standing in for it. The configuration that ships is the one that says
 nothing. (Engine line numbers are 5.8.)
 
@@ -480,6 +489,24 @@ it stopped on, then silence. The tick deliberately does not take the publish bac
 quietly restore the one-frame staleness above, and that is invisible at 60 fps where a frozen UI is
 not. (Engine line numbers are 5.8.)
 
+**27. Your code places boxes itself and needs the size each one came out at after text wrap.**
+Symptom: labels the host positions — nameplates, speech bubbles — have to be kept from overlapping,
+and that takes their laid-out height, which only RmlUi knows once a line wraps.
+Cause: layout lives on the UI thread. Every RmlUi read asserts it is on that thread
+(`check(FVaCuusUIThread::IsInUIThread())` in `BuildVaCuusInteractiveSnapshot`,
+`Source/VaCuus/Private/VaCuusInteractiveSnapshot.cpp`), and the JS DOM has no `offsetWidth`,
+`clientWidth` or `getBoundingClientRect` (the element prototype in
+`Source/VaCuusJs/Private/VaCuusJsDom.cpp`). `UVaCuusView::QueryElementBounds` does answer — for one
+element, looked up by `id`, a UI frame later, into a query you allocate and poll. That is the shape
+for aiming one click, not for a layout pass over every label on every frame.
+Do: put `vacuus-measure="<integer>"` on the element (`data-attr-vacuus-measure="row.Key"` in a
+`data-for`) and read `View->GetSnapshot().FindMeasuredRect(Key)` on the game thread. You get the
+border box in view pixels, including all fragments of a wrapped inline element, NOT clipped,
+one UI frame late, for every marked element at once and with
+no allocation in steady state. Change the key whenever the content changes, and a rect under the old
+key can't be mistaken for the new one. An invisible element and anything under `vacuus-passthrough`
+are not measured.
+
 ## Data binding and JS
 
 **9. Your data model binds to nothing, one Error at load time.**
@@ -493,7 +520,7 @@ is what makes that ordering hold across the thread boundary.
 **10. Your `data-for` list renders one extra invisible row — or styling misses rows.**
 Cause: the element carrying `data-for` is a hidden clone TEMPLATE, not the first row —
 `DataViewFor::Initialize` sets `display: none` on it and every generated row is a
-clone inserted before it (`m3_demo.rml:71-79`, citing DataViewDefault.cpp:474, :523).
+clone inserted before it (`m3_demo.rml:71-79`, citing DataViewDefault.cpp:479, :535).
 Do: hang row styling off the template's own class list; never expect the template
 element itself to render.
 

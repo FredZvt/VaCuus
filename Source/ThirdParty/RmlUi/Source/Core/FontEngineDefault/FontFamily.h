@@ -39,6 +39,9 @@ public:
 protected:
 	String name;
 
+	// VaCuus patch #13 (VENDORED_TAG.txt): (style, weight) requests already reported as drawn with a nearer weight.
+	SmallUnorderedSet<int> reported_weight_misses;
+
 	struct FontFaceEntry {
 		UniquePtr<FontFace> face;
 		// Only filled if we own the memory used by the face's FreeType handle. May be shared with other faces in this family.

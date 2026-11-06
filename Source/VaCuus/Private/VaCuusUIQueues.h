@@ -69,8 +69,15 @@ enum class EVaCuusCommandKind : uint8
 	/** Closes the view's document; the context stays up. */
 	CloseDocument,
 
-	/** Carries only ViewSize; see the note below on coalescing. */
+	/** Carries ViewSize and DpRatio; see the note below on coalescing. */
 	Resize,
+
+	/**
+	 * Carries BoundsQuery. THREAD-level in the drain (handled before the host lookup) so a
+	 * query for a retired view is answered Missing instead of dropped and left Pending; the
+	 * answer itself waits for the end of the frame -- see FVaCuusUIThread::AnswerBoundsQueries.
+	 */
+	QueryElementBounds,
 
 	/**
 	 * Creates one data model on the view's context and binds its variables to the model's
@@ -187,7 +194,7 @@ enum class EVaCuusCommandKind : uint8
 	 * VFS path) and bFallbackFace.
 	 *
 	 * FIFO IS THE FALLBACK ORDER. RmlUi consults fallback faces in registration order
-	 * (FontFaceHandleDefault.cpp:367-383), so the queue's ordering is not merely convenient here
+	 * (FontFaceHandleDefault.cpp:384-400), so the queue's ordering is not merely convenient here
 	 * -- it decides which face wins a glyph.
 	 */
 	LoadFontFace,
@@ -195,7 +202,7 @@ enum class EVaCuusCommandKind : uint8
 	/**
 	 * Drops ONE model condemned by a Blueprint struct recompile (VaCuus-akj.16, spec M6
 	 * 2(j)): out of this thread's registry and the write router, its data model out of the
-	 * view's context (Context::RemoveDataModel, Context.cpp:1097-1114 -- which is also what
+	 * view's context (Context::RemoveDataModel, Context.cpp:1523-1540 -- which is also what
 	 * frees the name for a later re-bind), then the UI-side buffers down through the model's
 	 * drop-state machine. Carries ViewId + Model.
 	 *
@@ -271,6 +278,16 @@ struct FVaCuusUICommand
 
 	/** View size in pixels; ZeroValue means "leave the current size alone". */
 	FIntPoint ViewSize = FIntPoint::ZeroValue;
+
+	/**
+	 * Resize only: RmlUi's density-independent pixel ratio for the view's context -- what one
+	 * `dp` is in physical pixels (bead VaCuus-w87.12). 0 means "leave it alone", so every other
+	 * kind, and a Resize from a caller with no opinion, keeps the ratio the view already has.
+	 */
+	float DpRatio = 0.0f;
+
+	/** QueryElementBounds only: the shared result the game thread is polling. */
+	TSharedPtr<FVaCuusElementBoundsQuery> BoundsQuery;
 
 	/** SetVisible only. */
 	bool bVisible = true;

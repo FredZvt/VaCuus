@@ -32,6 +32,11 @@ public:
 	/// @return The width, in pixels, this string will occupy if rendered with this handle.
 	int GetStringWidth(StringView string, const TextShapingContext& text_shaping_context, Character prior_character = Character::Null);
 
+	/// VaCuus patch #15 follow-up (VENDORED_TAG.txt): GetStringWidth continued from the unrounded pen `pen`, which it
+	/// advances. GetStringWidth is this from 0, so a line measured token by token adds exactly what one call over the
+	/// whole line adds, in the same order.
+	int GetStringWidthFrom(StringView string, const TextShapingContext& text_shaping_context, Character prior_character, float& pen);
+
 	/// Generates, if required, the layer configuration for a given list of font effects.
 	/// @param[in] font_effects The list of font effects to generate the configuration for.
 	/// @return The index to use when generating geometry using this configuration.
@@ -68,8 +73,8 @@ private:
 	// Build a kerning cache for common characters.
 	void FillKerningPairCache();
 
-	// Return the kerning for a character pair.
-	int GetKerning(Character lhs, Character rhs, bool& has_set_size) const;
+	// Return the kerning for a character pair. VaCuus patch #15 (VENDORED_TAG.txt): in fractional pixels.
+	float GetKerning(Character lhs, Character rhs, bool& has_set_size) const;
 
 	// Returns whether kerning is enabled based on the text-shaping context.
 	bool IsKerningEnabled(const TextShapingContext& text_shaping_context) const;
@@ -108,8 +113,8 @@ private:
 
 	// Pre-cache kerning pairs for some ascii subset of all characters.
 	using AsciiPair = uint16_t;
-	using KerningIntType = int16_t;
-	using KerningPairs = UnorderedMap<AsciiPair, KerningIntType>;
+	using KerningValueType = float; // VaCuus patch #15 (VENDORED_TAG.txt): was int16_t.
+	using KerningPairs = UnorderedMap<AsciiPair, KerningValueType>;
 	KerningPairs kerning_pair_cache;
 
 	bool has_kerning = false;

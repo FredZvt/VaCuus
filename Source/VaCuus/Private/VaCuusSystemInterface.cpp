@@ -19,7 +19,7 @@ namespace
  * the whole process (it is library state, not context state), but `cursor` is
  * resolved per context from its own hover element -- and each Rml::Context keeps
  * its own `cursor_name` and only calls out when *its* value changes
- * (Context.cpp:1324-1327). Since the UI thread updates views strictly one at a
+ * (Context.cpp:1794-1797). Since the UI thread updates views strictly one at a
  * time, a change observed immediately after view V's Update() is by construction
  * view V's. Each host therefore compares the serial right after its own Update()
  * and adopts the name only if it moved, which keeps N views from inheriting each
@@ -89,27 +89,36 @@ double FVaCuusSystemInterface::GetElapsedTime()
  */
 bool FVaCuusSystemInterface::LogMessage(Rml::Log::Type Type, const Rml::String& Message)
 {
-	const FString Text = UTF8_TO_TCHAR(Message.c_str());
+	// ONE UE_LOG PER LINE (bead VaCuus-w87.1). Some RmlUi diagnostics are a single multi-line
+	// string -- the data interpreter's program dump (DataExpression.cpp:930-931) is the common
+	// one -- and UE_LOG writes the timestamp, category and verbosity on the first line only, so
+	// every later line reached the log bare and slipped past any filter on "LogVaCuus" or
+	// "[Rml]". Empty lines are dropped: the dump ends in a newline.
+	TArray<FString> Lines;
+	FString(UTF8_TO_TCHAR(Message.c_str())).ParseIntoArrayLines(Lines, /*InCullEmpty=*/true);
 
-	switch (Type)
+	for (const FString& Text : Lines)
 	{
-	case Rml::Log::LT_ERROR:
-	case Rml::Log::LT_ASSERT:
-		UE_LOG(LogVaCuus, Error, TEXT("[Rml] %s"), *Text);
-		break;
-	case Rml::Log::LT_WARNING:
-		UE_LOG(LogVaCuus, Warning, TEXT("[Rml] %s"), *Text);
-		break;
-	case Rml::Log::LT_ALWAYS:
-		UE_LOG(LogVaCuus, Display, TEXT("[Rml] %s"), *Text);
-		break;
-	case Rml::Log::LT_INFO:
-		UE_LOG(LogVaCuus, Log, TEXT("[Rml] %s"), *Text);
-		break;
-	case Rml::Log::LT_DEBUG:
-	default:
-		UE_LOG(LogVaCuus, Verbose, TEXT("[Rml] %s"), *Text);
-		break;
+		switch (Type)
+		{
+		case Rml::Log::LT_ERROR:
+		case Rml::Log::LT_ASSERT:
+			UE_LOG(LogVaCuus, Error, TEXT("[Rml] %s"), *Text);
+			break;
+		case Rml::Log::LT_WARNING:
+			UE_LOG(LogVaCuus, Warning, TEXT("[Rml] %s"), *Text);
+			break;
+		case Rml::Log::LT_ALWAYS:
+			UE_LOG(LogVaCuus, Display, TEXT("[Rml] %s"), *Text);
+			break;
+		case Rml::Log::LT_INFO:
+			UE_LOG(LogVaCuus, Log, TEXT("[Rml] %s"), *Text);
+			break;
+		case Rml::Log::LT_DEBUG:
+		default:
+			UE_LOG(LogVaCuus, Verbose, TEXT("[Rml] %s"), *Text);
+			break;
+		}
 	}
 
 	// Continue execution (returning false asks RmlUi to break into the debugger).

@@ -93,7 +93,7 @@ public class VaCuus : ModuleRules
 		// bypasses the cooker, so sweeping a whole content directory is how a .uasset ends up
 		// staged raw and unusable. Listing the loose formats VaCuus actually reads keeps that
 		// impossible by construction. The image list is exactly what the recorder accepts
-		// (VaCuusRecordingRenderInterface.cpp:294 -- PNG, JPEG and UEJPEG; every other format
+		// (VaCuusRecordingRenderInterface.cpp:469 -- PNG, JPEG and UEJPEG; every other format
 		// is refused at the probe), and the font list is what RmlUi's FreeType interface
 		// loads.
 		//
@@ -152,11 +152,11 @@ public class VaCuus : ModuleRules
 	 * MUST TRACK VaCuusBundleFormat::GetPackedExtensions() and the live-reload watcher's
 	 * whitelist, for the reason the block above records: these are the formats the VFS
 	 * actually reads. The image list is exactly what the recorder accepts
-	 * (VaCuusRecordingRenderInterface.cpp:294 -- PNG, JPEG and UEJPEG; every other format is
+	 * (VaCuusRecordingRenderInterface.cpp:295 -- PNG, JPEG and UEJPEG; every other format is
 	 * refused at the probe), and the font list is what RmlUi's FreeType interface loads.
 	 */
 	private static readonly string[] DevUIStagedPatterns = new string[] {
-		"*.rml", "*.rcss", "*.js", "*.mjs", "*.png", "*.jpg", "*.jpeg", "*.ttf", "*.otf"
+		"*.rml", "*.rcss", "*.js", "*.mjs", "*.png", "*.jpg", "*.jpeg", "*.svg", "*.json", "*.ttf", "*.otf"
 	};
 
 	/**

@@ -168,4 +168,24 @@ StringList BasePointerDefinition::ReflectMemberNames()
 	return underlying_definition->ReflectMemberNames();
 }
 
+// VaCuus patch #10 (VENDORED_TAG.txt). Plain static, not thread_local: RmlUi is driven from one thread.
+static bool assignment_delivered = false;
+
+void VariableDefinition::ResetAssignmentDelivered()
+{
+	assignment_delivered = false;
+}
+
+bool VariableDefinition::ConsumeAssignmentDelivered()
+{
+	const bool result = assignment_delivered;
+	assignment_delivered = false;
+	return result;
+}
+
+void VariableDefinition::MarkAssignmentDelivered()
+{
+	assignment_delivered = true;
+}
+
 } // namespace Rml

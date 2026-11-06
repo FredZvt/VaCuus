@@ -38,7 +38,7 @@
  * of this test got it wrong — it bound `width` only, and passed with the patch REVERTED (100
  * dirty frames, 0 published). Two RmlUi shortcuts absorb the layout path: an unchanged box
  * never reaches OnResize, so no background is dirtied, and a text element reuses its compiled
- * geometry when the regenerated mesh compares equal (ElementText.cpp:530-536). The border and
+ * geometry when the regenerated mesh compares equal (ElementText.cpp:541-547). The border and
  * background path has no such check — ElementBackgroundBorder::GenerateGeometry releases and
  * re-makes the mesh unconditionally (ElementBackgroundBorder.cpp:131-137) — so a no-op write
  * to `border-left-width` is a fresh handle plus resource traffic, which is both legs of the
@@ -48,7 +48,7 @@
  * WHY THE MODEL IS NESTED. The differ only dirties a field whose value really changed, so the
  * defect needs a variable that is dirtied while the bound value stands still — and RmlUi gives
  * that away for free: a nested leaf dirties its ROOT's name (VaCuusBoundModel.cpp:379-387) and
- * views are matched by the FIRST name of their address (DataExpression.cpp:1144-1153), so
+ * views are matched by the FIRST name of their address (DataExpression.cpp:1145-1154), so
  * `Bar.Tick` moving re-evaluates both bindings. The shipped reference HUD hits the same shape
  * per row: refhud.rml:128 binds `data-style-width="row.Ping * 0.3 + 'px'"` inside a `data-for`,
  * where ANY field of ANY row dirties the whole array name.

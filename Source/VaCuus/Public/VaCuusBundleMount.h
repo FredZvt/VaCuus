@@ -165,6 +165,14 @@ namespace VaCuusBundleConfig
  * no settings object.
  */
 VACUUS_API FString GetConfiguredBundleAssetPath();
+
+/**
+ * `[VaCuus] bPackPluginDemos=True` in the project's *Game.ini puts VaCuus's own demo documents
+ * into the project's bundle as well; default false, so a buyer's Shipping bundle carries only
+ * the plugin's stylesheets and fonts (bead VaCuus-w87.14). For the plugin's own host projects,
+ * whose packaged acceptance runs boot the demos (-VaCuusRefHud, -VaCuusM5Demo).
+ */
+VACUUS_API bool ShouldPackPluginDemos();
 }	 // namespace VaCuusBundleConfig
 
 namespace VaCuusScriptServing

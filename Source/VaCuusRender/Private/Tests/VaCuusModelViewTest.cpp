@@ -41,7 +41,7 @@
  * published, 11 settle frames), while VaCuus.Model.Apply fails seven assertions. The reason is
  * RmlUi's own: DataViewText::Update and DataViewAttribute::Update only touch the DOM when the
  * evaluated value actually CHANGED -- `if (result && entry.value != value)` before SetText
- * (DataViewDefault.cpp:354) and `if (!attribute || attribute->Get<String>() != value)` before
+ * (DataViewDefault.cpp:359) and `if (!attribute || attribute->Get<String>() != value)` before
  * SetAttribute (:79) -- so re-dirtying an unchanged variable writes nothing, moves no geometry
  * and cannot fail the idle gate.
  *

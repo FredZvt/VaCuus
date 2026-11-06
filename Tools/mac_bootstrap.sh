@@ -1074,6 +1074,9 @@ configure_project() {
 	ini_add_line "${game}" "/Script/UnrealEd.ProjectPackagingSettings" '+DirectoriesToAlwaysCook=(Path="/VaCuus/Bundles")'
 	ini_add_line "${game}" "/Script/UnrealEd.ProjectPackagingSettings" '+DirectoriesToAlwaysCook=(Path="/VaCuus/Spike")'
 	ini_set "${game}" "VaCuus" "BundleAssetPath" "/VaCuus/Bundles/DevUIBundle.DevUIBundle"
+	# Row 15 boots the plugin's demos in Shipping; since bead VaCuus-w87.14 a bundle carries them
+	# only when the project asks (a buyer's bundle gets VaCuus's stylesheets and fonts alone).
+	ini_set "${game}" "VaCuus" "bPackPluginDemos" "True"
 
 	# The plugin must be enabled even when the project was created by an earlier run or by
 	# hand. Refuse rather than rewrite someone's descriptor.
@@ -1503,12 +1506,12 @@ run_rows() {
 	rep "On Linux the window sat at the desktop origin, so \"view pixels\" and \"Slate absolute pixels\""
 	rep "were the same numbers. **On Mac they are not, and the plugin does not compensate**:"
 	rep "\`HoverShot\`/\`TypeShot\` feed their x y straight to \`FSlateApplication::SetCursorPos\`"
-	rep "(\`VaCuusRender.cpp:1357-1397\`) while the widget converts back with"
-	rep "\`AbsoluteToLocal(...) * Geometry.Scale\` (\`SVaCuusWidget.cpp:381-388\`). The delta is the"
+	rep "(\`VaCuusRender.cpp:1359-1399\`) while the widget converts back with"
+	rep "\`AbsoluteToLocal(...) * Geometry.Scale\` (\`SVaCuusWidget.cpp:526-532\`). The delta is the"
 	rep "window origin plus the title bar. So the script runs only the parts that are immune:"
 	rep ""
 	grep_report "${LAST_SESSION_LOG}" "Rects\[|rects=|interactive rect" "rect list (view pixels — window-position-immune, plan block 6 step 2)"
-	grep_report "${LAST_SESSION_LOG}" "covered=|focusable=|answered Handled" "hit answer (pure view-pixel space, VaCuusRender.cpp:1311-1343)"
+	grep_report "${LAST_SESSION_LOG}" "covered=|focusable=|answered Handled" "hit answer (pure view-pixel space, VaCuusRender.cpp:1313-1345)"
 	grep_report "${LAST_SESSION_LOG}" "IME bridge built=" "row 4's own evidence line — it must read **absent=no, registered=yes**, the opposite of the Linux record"
 	grep_report "${LAST_SESSION_LOG}" "the event handled somewhere on the bubble path|unhandled \(it fell through\)|the press was taken by" \
 		"the built-in self-check (\`unhandled\` means fix the offset and re-run, NOT record a FAIL)"
@@ -1528,7 +1531,7 @@ run_rows() {
 	run_session "row06-nav" 90 "-" \
 		"vacuus.M2Demo, vacuus.M1HUD.NavShot Gamepad_DPad_Down Gamepad_DPad_Right" "${GAME_FLAGS[@]}"
 	rep "This row needs no human despite appearances: \`NavShot\` defers to \`OnBeginFrame\` and then"
-	rep "synthesizes the FKey sequence through \`FSlateApplication\` (\`VaCuusRender.cpp:1851-1890\` at"
+	rep "synthesizes the FKey sequence through \`FSlateApplication\` (\`VaCuusRender.cpp:1853-1892\` at"
 	rep "this HEAD — the plan cites :1814-1856, which is \`HoverShot\`'s twin of the same deferral;"
 	rep "plan block 5)."
 	rep ""

@@ -56,8 +56,17 @@ public:
 
 	virtual StringList ReflectMemberNames();
 
+	// VaCuus patch #10 (VENDORED_TAG.txt). An Assign instruction resets this, runs the assignment, and treats a
+	// false Set() as a failure only when it was NOT marked delivered.
+	static void ResetAssignmentDelivered();
+	static bool ConsumeAssignmentDelivered();
+
 protected:
 	VariableDefinition(DataVariableType type) : type(type) {}
+
+	// VaCuus patch #10: a Set() that hands the value on (and must not have the variable dirtied) calls this before
+	// returning false, so the delivered write is not reported as "Could not assign to variable".
+	static void MarkAssignmentDelivered();
 
 private:
 	DataVariableType type;

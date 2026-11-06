@@ -177,6 +177,18 @@ const TArray<FString>& GetDocumentRoots()
 	return Roots;
 }
 
+const FString& GetVaCuusDocumentRoot()
+{
+	static const FString Root = []
+	{
+		// Through the one join the list itself uses (Private::ToDevUIRoot), so the spelling
+		// cannot drift from GetDocumentRoots()'s entry for the same plugin.
+		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(Private::GVaCuusPluginName);
+		return Plugin.IsValid() ? Private::ToDevUIRoot(Plugin->GetContentDir()) : FString();
+	}();
+	return Root;
+}
+
 FString ResolveExistingDocument(const FString& VfsPath, FString* OutRoot, bool bIncludeMountedBundles)
 {
 	if (OutRoot)

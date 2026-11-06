@@ -33,7 +33,9 @@ if (-not (Test-Path $Project)) { Write-Host "ABORT: no project at '$Project'"; e
 
 $Log = Join-Path (Split-Path $Project) ('Saved\Logs\' + [IO.Path]::GetFileNameWithoutExtension($Project) + '.log')
 
-& $Editor $Project "-ExecCmds=Automation RunTests $Filter, Quit" -unattended -nullrhi -nosplash
+# '; Quit', not ', Quit': Automation splits its own argument on ';' and its own Quit exits when the
+# run completes, with the exit code set from the results (docs/buyer/setup.md section 4, items 1 and 4).
+& $Editor $Project -unattended -nullrhi -nosplash "-ExecCmds=Automation RunTests $Filter; Quit"
 
 Write-Host ''
 Write-Host "--- from $Log ---"

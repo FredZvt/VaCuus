@@ -37,7 +37,9 @@ static bool IsWatchedExtension(const FString& Extension)
 	return Extension.Equals(TEXT("rml"), ESearchCase::IgnoreCase) ||
 		   Extension.Equals(TEXT("rcss"), ESearchCase::IgnoreCase) ||
 		   Extension.Equals(TEXT("js"), ESearchCase::IgnoreCase) ||
-		   Extension.Equals(TEXT("mjs"), ESearchCase::IgnoreCase);
+		   Extension.Equals(TEXT("mjs"), ESearchCase::IgnoreCase) ||
+		   Extension.Equals(TEXT("svg"), ESearchCase::IgnoreCase) ||
+		   Extension.Equals(TEXT("json"), ESearchCase::IgnoreCase);
 }
 
 /**
@@ -93,8 +95,9 @@ static void WarnAboutSecondWorkingTree(const TArray<FString>& WatchedRoots)
 	UE_LOG(LogVaCuus, Warning,
 		TEXT("Live reload: a SECOND VaCuus working tree exists at '%s' -- this plugin is a git checkout ")
 		TEXT("whose remote points there, and it has its own Content/DevUI. It is NOT watched, and it cannot ")
-		TEXT("be: inotify watches inodes, not paths, so an edit made there produces no event, no reload and ")
-		TEXT("no error. The watched copy is '%s'. Edit that one, or make the two a single tree."),
+		TEXT("be: the directory watcher reports changes only under the directories it was given, so an edit ")
+		TEXT("made in the other copy produces no event, no reload and no error. The watched copy is '%s'. ")
+		TEXT("Edit that one, or make the two a single tree."),
 		*OtherDevUI, *FString::Join(WatchedRoots, TEXT(" | ")));
 }
 }	 // namespace VaCuusLiveReloadPrivate
@@ -273,7 +276,7 @@ void FVaCuusLiveReload::Start()
 	// Telling them the rule here is what turns a silent failure into a readable one.
 	UE_LOG(LogVaCuus, Log,
 		TEXT("Live reload watching %d root(s): %s (debounce: %.0f ms of quiet, %.0f ms cap). ")
-		TEXT("ONLY these directories: inotify watches inodes, not paths, so saving a COPY of a document ")
+		TEXT("ONLY these directories: the directory watcher reports changes under the roots it was given, so saving a COPY of a document ")
 		TEXT("anywhere else on disk produces no event, no reload and no error -- if live reload seems dead, ")
 		TEXT("check that the file you edited is under a root named above."),
 		WatchedRoots.Num(), *FString::Join(WatchedRoots, TEXT(" | ")), QuietSeconds * 1000.0, MaxDeferSeconds * 1000.0);

@@ -35,7 +35,7 @@
  * is a SAME-FRAME claim: rows must appear in the very UI frame whose DataApply consumed the
  * publish. That needs, per recorded frame, both the rows and evidence of the apply, taken
  * together on the UI thread. So this host keeps a per-frame log: ApplyModelUpdates runs
- * before the per-view record loop inside one RunFrame (VaCuusUIThread.cpp:1097-1106), so the
+ * before the per-view record loop inside one RunFrame (VaCuusUIThread.cpp:1153-1162), so the
  * frame's record already includes its own apply, and "the frame whose cumulative
  * fields-applied counter moved also shows the rows" IS the same-frame property -- with no
  * race on how many frames a coalesced trigger actually granted.
@@ -154,7 +154,7 @@ private:
 		}
 
 		// The data-for TEMPLATE keeps its attribute -- only the generated rows drop it
-		// (DataViewDefault.cpp:486-491) -- and rows are inserted BEFORE it (:522-523), so
+		// (DataViewDefault.cpp:491-496) -- and rows are inserted BEFORE it (:534-535), so
 		// "every child without data-for, in order" is exactly the rows, in row order.
 		const int NumChildren = Container->GetNumChildren();
 		for (int Index = 0; Index < NumChildren; ++Index)
@@ -208,9 +208,9 @@ static bool RunFrames(FVaCuusUIThread& UIThread, int32 NumFrames)
  * FrameLog must stay below this, and never trust FrameLog.Num() or Last().
  *
  * WHY WaitForFrameCount IS NOT ENOUGH: every Enqueue* ends in Trigger()
- * (VaCuusUIThread.cpp:549-555), the wake event is a binary AutoReset latch
- * (VaCuusUIThread.h:473-474), and FrameCount increments only AFTER RunFrame returns
- * (VaCuusUIThread.cpp:963-964). A trigger that lands mid-frame therefore leaves the event
+ * (VaCuusUIThread.cpp:553-559), the wake event is a binary AutoReset latch
+ * (VaCuusUIThread.h:507-508), and FrameCount increments only AFTER RunFrame returns
+ * (VaCuusUIThread.cpp:1019-1020). A trigger that lands mid-frame therefore leaves the event
  * set, and the worker runs ONE MORE frame concurrent with test-thread code that already saw
  * its awaited count -- a frame whose AddDefaulted_GetRef bumps ArrayNum BEFORE the record's
  * FStrings and TArrays are constructed, so FrameLog.Num()/Last() can name a record that is
@@ -266,7 +266,7 @@ static int32 FindSingleApplyFrame(const TArray<FFrameRecord>& Log, int32 FirstFr
  * not observable without patching vendored RmlUi, and is not claimed. What CAN be said about
  * the one-row change is said here: RmlUi re-evaluates every view in every row on any dirty
  * of the root, but the DOM write gates on compare -- `if (result && entry.value != value)`
- * before SetText (DataViewDefault.cpp:354) -- so every untouched row's captured text must
+ * before SetText (DataViewDefault.cpp:359) -- so every untouched row's captured text must
  * come back byte-identical.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusDataForRowsTest, "VaCuus.Model.DataForRows",
@@ -440,7 +440,7 @@ bool FVaCuusDataForRowsTest::RunTest(const FString& Parameters)
 	// ---- 5. Front-trim: every row equals the SHIFTED expectation, by design. ----
 	//
 	// Row identity is positional and frozen -- `it` aliases Arr[i] with the creation-time i,
-	// forever (DataViewDefault.cpp:509-518; spec 3.6) -- so removing the front shifts every
+	// forever (DataViewDefault.cpp:521-530; spec 3.6) -- so removing the front shifts every
 	// value under fixed row indices: all surviving rows re-render with their successor's
 	// values and the tail row disappears. CheckApplyFrame's recompute-from-Live IS the
 	// shifted expectation; asserting anything else would be fighting RmlUi's semantics.
@@ -768,7 +768,7 @@ bool FVaCuusDataForIdleTest::RunTest(const FString& Parameters)
 	//
 	// One element changes: the publish, the apply and the evaluations all move again, and a
 	// dirty of the root re-evaluates EVERY row's views (spec 3.6) while only the changed
-	// row's DOM text moves (the compare-before-write gate, DataViewDefault.cpp:354).
+	// row's DOM text moves (the compare-before-write gate, DataViewDefault.cpp:359).
 
 	Live.Killfeed[137].Killer = TEXT("Control");
 	TestEqual(TEXT("the control change marks the field"), Model->Sample(Type, &Live), 1);

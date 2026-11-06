@@ -13,7 +13,7 @@
  * THE NESTING IS THE WHOLE POINT, not tidiness. FVaCuusBoundModel::ApplyUpdate dirties a
  * nested leaf's ROOT variable, never the leaf (VaCuusBoundModel.cpp:379-387, and the same
  * rule is why FVaCuusDemoTarget exists), and RmlUi maps dirty variables to views by the FIRST
- * name of each address (DataExpression.cpp:1144-1153). So `Tick` moving re-runs every view
+ * name of each address (DataExpression.cpp:1145-1154). So `Tick` moving re-runs every view
  * that mentions `Bar` — including the data-style bindings whose values did not move. That is
  * the coarse re-evaluation the perf guide already documents at panel scale ("a one-panel
  * change re-evaluates 192 bindings"), reduced to three fields.
@@ -46,7 +46,7 @@ struct FVaCuusDataStyleTestBar
 	 * not to publish on its own: a no-op `width` write costs a restyle and a whole-document
 	 * relayout, and then the gate absorbs it, because the box comes out identical (no
 	 * OnResize, so no background dirty) and RmlUi reuses a text element's compiled geometry
-	 * when the regenerated mesh compares equal (ElementText.cpp:530-536). Its cost is UI-thread
+	 * when the regenerated mesh compares equal (ElementText.cpp:541-547). Its cost is UI-thread
 	 * time, not published frames. Both bindings sit on one element so that one document says
 	 * both halves.
 	 */
