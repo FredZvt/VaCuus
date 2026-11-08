@@ -26,6 +26,7 @@
 #include "VaCuusJsDomHandle.h"
 #include "VaCuusJsRuntime.h"
 
+#include <RmlUi/Core/ComputedValues.h>
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/ElementText.h>
@@ -108,6 +109,7 @@ enum EScrollAxis : int32
 	ScrollAxisTop = 0,	  // `scrollTop`: Element::Get/SetScrollTop
 	ScrollAxisLeft		  // `scrollLeft`: Element::Get/SetScrollLeft
 };
+
 
 /** DOM nodeType values (the only three this facade can produce). */
 enum ENodeType : int32
@@ -211,6 +213,24 @@ bool ApplyAlignment(JSContext* Ctx, JSValueConst Options, const char* Key, Rml::
 		}
 	}
 	return true;
+}
+
+/**
+ * RmlUi's navigation gate includes tab-index (ElementDocument.cpp:30-44), while Element::Focus
+ * itself only checks computed focus and context state (Element.cpp:1181-1194). Navigation walks
+ * the tree and prunes hidden subtrees (ElementDocument.cpp:94-114); a direct call must check ancestors explicitly
+ * through IsVisible(true) (Element.cpp:569-580).
+ */
+bool CanScriptFocus(const Rml::Element& Element)
+{
+	if (!Element.IsVisible(/*include_ancestors=*/true))
+	{
+		return false;
+	}
+
+	const Rml::ComputedValues& Computed = Element.GetComputedValues();
+
+	return Computed.focus() != Rml::Style::Focus::None && Computed.tab_index() == Rml::Style::TabIndex::Auto;
 }
 
 /** The "behavior" key, by the same rules as ApplyAlignment. */
@@ -505,6 +525,7 @@ void FVaCuusJsViewContext::InstallDomPrototypes()
 		JS_CFUNC_MAGIC_DEF("insertBefore", 2, FVaCuusJsViewContext::InsertThunk, InsertBeforeRef),
 		JS_CFUNC_DEF("removeChild", 1, FVaCuusJsViewContext::RemoveChildThunk),
 		JS_CFUNC_DEF("remove", 0, FVaCuusJsViewContext::RemoveThunk),
+		JS_CFUNC_DEF("focus", 0, FVaCuusJsViewContext::FocusThunk),
 		JS_CFUNC_DEF("scrollIntoView", 0, FVaCuusJsViewContext::ScrollIntoViewThunk),
 		JS_CGETSET_MAGIC_DEF("scrollTop", FVaCuusJsViewContext::ScrollOffsetGetterThunk,
 			FVaCuusJsViewContext::ScrollOffsetSetterThunk, ScrollAxisTop),
@@ -922,6 +943,66 @@ JSValue FVaCuusJsViewContext::RemoveThunk(JSContext* Ctx, JSValueConst This, int
 	// destroy; no-op by the same never-throw rule.
 
 	return JS_UNDEFINED;
+}
+
+// ---------------------------------------------------------------------------
+// Element prototype: focus
+// ---------------------------------------------------------------------------
+
+/**
+ * Script focus returns whether a focusable element accepted focus, allowing a gamepad highlight
+ * to walk from a label to its focusable row without synthesizing a mouse press. Releasing focus
+ * remains the host's NavigateBack operation; Element::Blur focuses its parent (Element.cpp:1213-1224).
+ *
+ * focusVisible follows RmlUi's focus events: OnFocusChange sends them over the changed chains
+ * (Context.cpp:1706-1718), and the target action updates the pseudo classes (Element.cpp:2036-2047).
+ * Re-focusing the same element therefore does not change its existing :focus-visible state.
+ */
+JSValue FVaCuusJsViewContext::FocusThunk(JSContext* Ctx, JSValueConst This, int Argc, JSValueConst* Argv)
+{
+	using namespace VaCuusJsDomInternal;
+
+	FVaCuusJsViewContext* Self = GetSelfOrNull(Ctx);
+	if (Self == nullptr)
+	{
+		return JS_FALSE;	// dead context: there is no tree left to focus in
+	}
+
+	Rml::Element* Element = Self->GetLiveElement(This);
+	if (Element == nullptr)
+	{
+		return JS_FALSE;	// dead handle: a no-op, like every other member
+	}
+
+	bool bFocusVisible = false;
+
+	if (Argc >= 1 && JS_IsObject(Argv[0]))
+	{
+		const JSValue Requested = JS_GetPropertyStr(Ctx, Argv[0], "focusVisible");
+		if (JS_IsException(Requested))
+		{
+			// A getter on the options object threw. That is the SCRIPT's throw, not a facade
+			// throw, so it propagates -- the same carve-out ToRmlString documents.
+			return JS_EXCEPTION;
+		}
+
+		// Absent reads as undefined, whose ToBool is false, which is the DOM's own default.
+		bFocusVisible = JS_ToBool(Ctx, Requested) == 1;
+		JS_FreeValue(Ctx, Requested);
+	}
+
+	// The gate runs AFTER the dictionary is read, which is the order WebIDL gives: arguments are
+	// converted before the algorithm runs, so a throwing getter throws even on an element that was
+	// never going to take the focus.
+	// The getter may remove the receiver and let the element pool reuse its address. Resolve
+	// the observed handle again, as ScrollIntoViewThunk does after reading its options.
+	Element = Self->GetLiveElement(This);
+	if (Element == nullptr || !CanScriptFocus(*Element))
+	{
+		return JS_FALSE;
+	}
+
+	return JS_NewBool(Ctx, Element->Focus(bFocusVisible));
 }
 
 // ---------------------------------------------------------------------------

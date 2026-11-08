@@ -85,6 +85,21 @@ interface VaCuusElement {
 	/** Fresh Proxy per access; camelCase maps to kebab-case; see VaCuusStyle. */
 	readonly style: VaCuusStyle;
 	/**
+	 * Moves RmlUi focus to this element for a keyboard or gamepad highlight.
+	 * Uses current computed styles: the element and its ancestors must be
+	 * visible, its `focus` must allow focus, and its `tab-index` must be `auto`.
+	 * Returns whether RmlUi accepted focus; refusal leaves the current focus
+	 * unchanged. A dead handle returns false, including when an options getter
+	 * destroys the receiver.
+	 * The boolean lets a caller find a focusable row above a label:
+	 * `while (el && !el.focus()) el = el.parentNode;`.
+	 * `{focusVisible: true}` also sets `:focus-visible` when focus moves.
+	 * The default is false. Re-focusing the current element leaves its existing
+	 * pseudo classes unchanged because RmlUi dispatches no new focus event.
+	 * Releasing focus remains the host's NavigateBack operation.
+	 */
+	focus(options?: VaCuusFocusOptions): boolean;
+	/**
 	 * Scrolls every ancestor scroll container so this element is visible, DOM
 	 * defaults included: no argument means `{block: "start", inline: "nearest",
 	 * behavior: "auto"}`, and `scrollIntoView(false)` aligns with the bottom edge.
@@ -202,6 +217,15 @@ interface VaCuusScrollIntoViewOptions {
 	block?: 'start' | 'center' | 'end' | 'nearest';
 	inline?: 'start' | 'center' | 'end' | 'nearest';
 	behavior?: 'auto' | 'instant' | 'smooth';
+}
+
+/**
+ * focus() options. `focusVisible` sets `:focus-visible` alongside `:focus`,
+ * for a highlight the player drove from a key or a pad rather than a press.
+ * An argument type, not a facade object: NOT part of the conformance walk.
+ */
+interface VaCuusFocusOptions {
+	focusVisible?: boolean;
 }
 
 /** console.* — each argument stringified, joined by spaces, to LogVaCuusJS. */

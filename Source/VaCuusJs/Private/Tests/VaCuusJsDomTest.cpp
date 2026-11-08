@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "VaCuusJsDomTestRig.h"
+#include "Misc/ScopeExit.h"
 
 #include <RmlUi/Core/Factory.h>
 
@@ -26,6 +27,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusJsDomCreateElementLowercaseTest, "VaCuus
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusJsDomScrollIntoViewTest, "VaCuus.Js.Dom.ScrollIntoView",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusJsDomScrollOffsetTest, "VaCuus.Js.Dom.ScrollOffset",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusJsDomFocusTest, "VaCuus.Js.Dom.Focus",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVaCuusJsDomTwoViewIsolationTest, "VaCuus.Js.Dom.TwoViewIsolation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -525,6 +528,182 @@ span.col { display: inline-block; width: 50px; height: 50px; }
 			"String(doomed.scrollIntoView({block: 'start'}))"),
 		FString(TEXT("undefined")));
 
+	TestEqual(TEXT("no JS error anywhere in the run"), FWrappedDomHost::Inner->GetRuntime()->GetNumErrors(), uint64(0));
+	return true;
+}
+
+/**
+ * focus(): what it returns, what it refuses, what `:focus-visible` does, and the ancestor walk the
+ * boolean exists for.
+ *
+ * THE REFUSAL IS THE LOAD-BEARING CASE. Element::Focus has no tab-index gate, so the easy
+ * implementation -- pass the call through -- focuses a plain `<div>` and reports success. Drop
+ * CanScriptFocus from the thunk and steps 3, 4 and 5 all fail together: the div answers true, the
+ * walk parks the highlight on a span, and the row never gets it.
+ *
+ * The context's focus is read on the UI side as well as through the facade, so an assertion cannot
+ * pass by the script agreeing with itself about a call that never reached RmlUi.
+ */
+bool FVaCuusJsDomFocusTest::RunTest(const FString& Parameters)
+{
+	using namespace VaCuusJsDomTest;
+
+	FDomTestRig Rig;
+	const FDomTestRig::EBoot Boot = Rig.Boot(*this);
+	if (Boot != FDomTestRig::EBoot::Ok)
+	{
+		return Boot == FDomTestRig::EBoot::Skip;
+	}
+
+	// Three shapes, one per question. `#btn` is plainly focusable. `#wrap` is a plain div holding a
+	// `#label` span -- nothing in that subtree is focusable, which is what an ungated focus() gets
+	// wrong. `#row` is the same shape with `tab-index: auto` on the wrapper, which is how a list row
+	// is built. No text nodes anywhere, so no font is needed and no layout warning fires.
+	static const TCHAR* GDocument = TEXT(R"(<rml>
+<head><style>
+body { display: block; }
+div { display: block; }
+span { display: inline-block; width: 40px; height: 20px; }
+button { display: block; tab-index: auto; width: 100px; height: 40px; }
+#plain { width: 100px; height: 40px; }
+#row { tab-index: auto; width: 100px; height: 40px; }
+</style></head>
+<body><button id="btn"/><div id="wrap"><span id="label"/></div><div id="plain"/><div id="row"><span id="row-label"/></div><div style="display: none;"><button id="hidden-btn"/></div></body>
+</rml>)");
+
+	FDomProbeHost* Probe = nullptr;
+	const uint32 ViewId = Rig.AddViewWithDocument(Probe, TEXT("vacuus_jsdom_focus"), GDocument);
+
+	bool bBound = false;
+	Rig.RunOnUI([&bBound, Probe, ViewId]()
+		{
+			Rml::ElementDocument* Document = Probe->GetDocument();
+			bBound = Document != nullptr;
+			FWrappedDomHost::Inner->BindDocumentForTest(ViewId, Document);
+		});
+	if (!TestTrue(TEXT("the document loaded and bound"), bBound))
+	{
+		return false;
+	}
+
+	// RmlUi's own answer, not the facade's: the id of whatever the CONTEXT thinks holds focus.
+	const auto ReadFocusId = [&Rig, Probe]() -> FString
+	{
+		FString Id;
+		Rig.RunOnUI([&Id, Probe]()
+			{
+				Rml::Element* const Focus = Probe->GetContext() != nullptr ? Probe->GetContext()->GetFocusElement() : nullptr;
+				Id = Focus != nullptr ? FString(UTF8_TO_TCHAR(Focus->GetId().c_str())) : FString();
+			});
+		return Id;
+	};
+
+	// 1. A focusable element takes focus, and says so. The boolean is the whole addition.
+	TestEqual(TEXT("focus() on a focusable element returns true"),
+		Rig.Eval(ViewId, "String(document.getElementById('btn').focus())"), FString(TEXT("true")));
+	TestEqual(TEXT("...and RmlUi's own focus moved to it"), ReadFocusId(), FString(TEXT("btn")));
+
+	// 2. :focus-visible is opt-in. Default false, as for a pointer press; true is what a key or a
+	// pad press means, which is the case this method exists for.
+	//
+	// ON A DIFFERENT ELEMENT THAN STEP 1, and that is a property of RmlUi rather than tidiness:
+	// OnFocusChange dispatches Blur and Focus over the SET DIFFERENCE of the old and new focus
+	// chains (Context.cpp:1706-1718), so re-focusing the element that already holds focus dispatches
+	// nothing at all -- and the pseudo classes are set from the Focus event's target phase
+	// (Element.cpp:2036-2047). Options therefore only land on a focus that actually moves.
+	Rig.Eval(ViewId, "document.getElementById('row').focus({focusVisible: true})");
+	bool bFocusVisible = false;
+	Rig.RunOnUI([&bFocusVisible, Probe]()
+		{
+			Rml::Element* const Row = Probe->GetDocument()->GetElementById("row");
+			bFocusVisible = Row != nullptr && Row->IsPseudoClassSet("focus-visible");
+		});
+	TestTrue(TEXT("focus({focusVisible: true}) sets :focus-visible"), bFocusVisible);
+
+	// And the default does not: back to the button, which is a move, so the options are read.
+	Rig.Eval(ViewId, "document.getElementById('btn').focus()");
+	bool bStillFocusVisible = false;
+	Rig.RunOnUI([&bStillFocusVisible, Probe]()
+		{
+			Rml::Element* const Button = Probe->GetDocument()->GetElementById("btn");
+			bStillFocusVisible = Button != nullptr && Button->IsPseudoClassSet("focus-visible");
+		});
+	TestFalse(TEXT("focus() with no options leaves :focus-visible alone"), bStillFocusVisible);
+
+	// 3. THE GATE, and the assertion that fails if it is dropped: a plain div has no `tab-index:
+	// auto`, so navigation cannot reach it and neither may a script -- even though RmlUi's own
+	// Element::Focus would take it, which is exactly why the facade does not call it unguarded. A
+	// refusal is false, not a throw, and must not move the focus that is already placed.
+	TestEqual(TEXT("focus() on an element with no tab-index returns false"),
+		Rig.Eval(ViewId, "String(document.getElementById('plain').focus())"), FString(TEXT("false")));
+	TestEqual(TEXT("...and the focus did not move"), ReadFocusId(), FString(TEXT("btn")));
+
+	// 4. THE REASON THE BOOLEAN IS RETURNED: walking up from a non-focusable descendant until one
+	// ancestor accepts. `#label` is a span inside a plain `#wrap` -- the shape a pointer lands on
+	// when a row's label is under it -- and neither is focusable, so the walk runs off the top of
+	// the tree rather than parking the highlight on a span. A caller then leaves the focus alone,
+	// which is the correct outcome and the one an ungated focus() would make impossible.
+	TestEqual(TEXT("the ancestor walk finds nothing focusable above a label in a plain wrapper"),
+		Rig.Eval(ViewId,
+			"(function(){ let el = document.getElementById('label');"
+			" while (el && !el.focus()) { el = el.parentNode; }"
+			" return el ? String(el.id || el.tagName) : 'none'; })()"),
+		FString(TEXT("none")));
+	TestEqual(TEXT("...and the walk left the existing focus where it was"), ReadFocusId(), FString(TEXT("btn")));
+
+	// 5. The same walk from a label that DOES sit inside a focusable row ends on the row, which is
+	// the case the method exists for.
+	TestEqual(TEXT("the walk stops at the focusable ancestor"),
+		Rig.Eval(ViewId,
+			"(function(){ let el = document.getElementById('row-label');"
+			" while (el && !el.focus()) { el = el.parentNode; }"
+			" return el ? String(el.id) : 'none'; })()"),
+		FString(TEXT("row")));
+	TestEqual(TEXT("...and RmlUi agrees the row holds the focus"), ReadFocusId(), FString(TEXT("row")));
+
+	// 6. A throwing getter on the options object is the SCRIPT's throw and must propagate.
+	const FString Thrown = Rig.Eval(ViewId,
+		"document.getElementById('btn').focus({get focusVisible() { throw new Error('nope'); }})");
+	TestTrue(TEXT("a throwing getter propagates"), Thrown.Contains(TEXT("nope")));
+	TestTrue(TEXT("a throwing getter is read before refusing an unfocusable receiver"),
+		Rig.Eval(ViewId, "document.getElementById('plain').focus({get focusVisible() { throw new Error('plain-nope'); }})")
+			.Contains(TEXT("plain-nope")));
+
+	TestEqual(TEXT("a button under a hidden panel cannot take script focus"),
+		Rig.Eval(ViewId, "String(document.getElementById('hidden-btn').focus())"), FString(TEXT("false")));
+	TestEqual(TEXT("hidden panel refusal leaves focus on the row"), ReadFocusId(), FString(TEXT("row")));
+	Rig.Eval(ViewId, "document.getElementById('row').focus()");
+
+	// The pool can reuse the removed button's slot for another button. Resolve its styles
+	// synchronously inside the getter so this does not rely on a later frame or stale properties.
+	static Rml::Context* FocusTestContext = nullptr;
+	ON_SCOPE_EXIT { FocusTestContext = nullptr; };
+	Rig.RunOnUI([Probe, ViewId]()
+		{
+			FocusTestContext = Probe->GetContext();
+			JSContext* Js = FWrappedDomHost::Inner->FindViewContext(ViewId)->GetContext();
+			JSValue Global = JS_GetGlobalObject(Js);
+			JS_SetPropertyStr(Js, Global, "flushFocusTestStyles", JS_NewCFunction(Js,
+				[](JSContext*, JSValueConst, int, JSValueConst*) -> JSValue
+				{
+					check(FVaCuusUIThread::IsInUIThread());
+					check(FocusTestContext != nullptr);
+					FocusTestContext->Update();
+					return JS_UNDEFINED;
+				}, "flushFocusTestStyles", 0));
+			JS_FreeValue(Js, Global);
+		});
+	TestEqual(TEXT("a getter removing its receiver cannot focus the replacement button"),
+		Rig.Eval(ViewId,
+			"globalThis.focusVictim = document.getElementById('btn');"
+			"globalThis.focusCanary = null;"
+			"const focusResult = focusVictim.focus({get focusVisible() {"
+			" focusVictim.remove(); focusCanary = document.createElement('button');"
+			" focusCanary.id = 'replacement'; document.getElementById('wrap').appendChild(focusCanary);"
+			" flushFocusTestStyles(); return true; }});"
+			"[String(focusResult), String(focusVictim.id), focusCanary.id].join('|')"),
+		FString(TEXT("false|null|replacement")));
+	TestEqual(TEXT("removal in the getter leaves focus on the original row"), ReadFocusId(), FString(TEXT("row")));
 	TestEqual(TEXT("no JS error anywhere in the run"), FWrappedDomHost::Inner->GetRuntime()->GetNumErrors(), uint64(0));
 	return true;
 }

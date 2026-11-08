@@ -868,7 +868,13 @@ FReply SVaCuusWidget::OnMouseMove(const FGeometry& MyGeometry, const FPointerEve
 	VACUUS_PERF_SCOPE(Input);
 
 	const FIntPoint Position = ToViewPixels(MyGeometry, MouseEvent.GetScreenSpacePosition());
-	SendMouseInput(MouseEvent, FVaCuusInputEvent::MouseMove(Position, ToModifierState(MouseEvent)));
+
+	// Slate's stationary samples also carry host geometry changes (SlateUser.cpp:741-748).
+	// Keep their view-space positions current, but let the UI thread check mouse activation
+	// in queue order so a direct MouseLeave cannot be undone by the next synthetic sample.
+	SendMouseInput(MouseEvent, MouseEvent.GetCursorDelta().IsNearlyZero()
+		? FVaCuusInputEvent::MouseMoveIfActive(Position, ToModifierState(MouseEvent))
+		: FVaCuusInputEvent::MouseMove(Position, ToModifierState(MouseEvent)));
 
 	// The mouse fallback of a touch its touch handler passed on. Answering from the snapshot here would
 	// swallow that finger again: a finger's moves are answered by OnTouchMoved alone.
@@ -1300,7 +1306,7 @@ void SVaCuusWidget::OnMouseEnter(const FGeometry& MyGeometry, const FPointerEven
 {
 	// Returns void, so there is nothing to answer -- but the move still has to be
 	// queued: it is what re-arms `mouse_active` after a ProcessMouseLeave
-	// (Context.cpp:658-660), and without it hover stays dead until the pointer
+	// (Context.cpp:667-669), and without it hover stays dead until the pointer
 	// happens to move again inside the widget.
 	SendMouseInput(MouseEvent, FVaCuusInputEvent::MouseMove(
 		ToViewPixels(MyGeometry, MouseEvent.GetScreenSpacePosition()), ToModifierState(MouseEvent)));
@@ -1316,7 +1322,7 @@ void SVaCuusWidget::OnMouseLeave(const FPointerEvent& MouseEvent)
 	}
 
 	// Mandatory. Without ProcessMouseLeave the hover chain is never cleared and
-	// `:hover` styling sticks forever (Context.cpp:914-921). No geometry is needed --
+	// `:hover` styling sticks forever (Context.cpp:922-929). No geometry is needed --
 	// and none is given (SWidget.h:430).
 	SendInput(FVaCuusInputEvent::MouseLeave());
 }
